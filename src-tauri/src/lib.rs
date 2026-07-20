@@ -102,7 +102,24 @@ async fn get_file_size(path: String) -> Result<u64, String> {
         .map_err(|e| e.to_string())
 }
 
-// 비디오를 자르고 인코딩하여 저장하는 커맨드 (용량 압축 CRF 설정, 크롭 좌표 및 copy 최적화 포함)
+// atempo 오디오 속도 필터 체이닝 헬퍼 (0.5~2.0 한계 보정)
+fn build_atempo_filter(speed: f64) -> String {
+    let mut current_speed = speed;
+    let mut filters = Vec::new();
+    
+    while current_speed > 2.0 {
+        filters.push("atempo=2.0".to_string());
+        current_speed /= 2.0;
+    }
+    while current_speed < 0.5 {
+        filters.push("atempo=0.5".to_string());
+        current_speed /= 0.5;
+    }
+    filters.push(format!("atempo={:.4}", current_speed));
+    filters.join(",")
+}
+
+// 비디오를 자르고 인코딩하여 저장하는 커맨드 (용량 압축 CRF 설정, 크롭 좌표, 배속 및 copy 최적화 포함)
 #[tauri::command]
 async fn export_video(
     app_handle: tauri::AppHandle,
@@ -117,10 +134,19 @@ async fn export_video(
     crop_y: Option<u32>,
     crop_w: Option<u32>,
     crop_h: Option<u32>,
+    export_speed: Option<f64>,
+    is_muted: Option<bool>,
 ) -> Result<String, String> {
     let ffmpeg = get_ffmpeg_path(&app_handle);
     let start_str = format!("{:.3}", start_time);
     let duration_str = format!("{:.3}", end_time - start_time);
+
+    let speed = export_speed.unwrap_or(1.0);
+    let is_speed_changed = (speed - 1.0).abs() > 0.01;
+    let muted = is_muted.unwrap_or(false);
+
+    // 배속 변경 또는 음소거 설정 시 스트림 복제 사용 불가 (재인코딩 필요)
+    let actual_use_copy = use_copy && !is_speed_changed && !muted;
 
     let mut cmd = Command::new(&ffmpeg);
     #[cfg(target_os = "windows")]
@@ -132,21 +158,39 @@ async fn export_video(
     cmd.arg("-t").arg(&duration_str);
     cmd.arg("-i").arg(&input_path);
 
-    if use_copy {
+    if actual_use_copy {
         // 원본 유지 + 초고속 무손실 스트림 복제
         cmd.arg("-c").arg("copy");
     } else {
-        // 비디오/오디오 재인코딩 수행 (압축 또는 FPS 변경)
+        // 비디오/오디오 재인코딩 수행 (압축, FPS 변경, 크롭, 배속 변경, 음소거)
         if fps != "original" {
             cmd.arg("-r").arg(&fps);
         }
         cmd.arg("-c:v").arg("libx264");
-        cmd.arg("-c:a").arg("aac");
         
-        // 크롭 필터 적용 (crop=w:h:x:y)
-        if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
-            cmd.arg("-vf").arg(format!("crop={}:{}:{}:{}", w, h, x, y));
+        // 음소거 선택 시 오디오 트랙 완전 제거 (-an), 아닐 경우 AAC 인코딩
+        if muted {
+            cmd.arg("-an");
+        } else {
+            cmd.arg("-c:a").arg("aac");
+            if is_speed_changed {
+                cmd.arg("-af").arg(build_atempo_filter(speed));
+            }
         }
+        
+        // 비디오 필터 (-vf)
+        let mut vf_filters = Vec::new();
+        if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
+            vf_filters.push(format!("crop={}:{}:{}:{}", w, h, x, y));
+        }
+        if is_speed_changed {
+            let pts_mult = 1.0 / speed;
+            vf_filters.push(format!("setpts={:.4}*PTS", pts_mult));
+        }
+        if !vf_filters.is_empty() {
+            cmd.arg("-vf").arg(vf_filters.join(","));
+        }
+
 
         // CRF 압축률 결정 (기본값 23)
         let crf_val = crf.unwrap_or(23);

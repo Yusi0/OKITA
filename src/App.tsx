@@ -52,6 +52,28 @@ function App() {
   const [cropAspectRatio, setCropAspectRatio] = useState<string>("free");
   const [videoRect, setVideoRect] = useState<DOMRect | null>(null);
 
+  // 시청 배속 상태 정의 (기본 1.0배속)
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  // 편집 음소거 상태 정의 (기본 false)
+  const [isEditMuted, setIsEditMuted] = useState<boolean>(false);
+
+  const handlePlaybackSpeedChange = (speed: number) => {
+    setPlaybackSpeed(speed);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = speed;
+    }
+  };
+
+  const handleToggleEditMute = () => {
+    setIsEditMuted((prev) => {
+      const next = !prev;
+      if (videoRef.current) {
+        videoRef.current.muted = next || isMuted;
+      }
+      return next;
+    });
+  };
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const controlsTimeoutRef = useRef<number | null>(null);
@@ -386,6 +408,15 @@ function App() {
     if (videoRef.current) {
       const curTime = videoRef.current.currentTime;
       setCurrentTime(curTime);
+
+      // 편집 모드 시 잘라낸 종료 시점(trimEnd)에 도달하면 즉시 정지
+      if (isEditMode && trimEnd > 0 && curTime >= trimEnd) {
+        videoRef.current.pause();
+        videoRef.current.currentTime = trimEnd;
+        setCurrentTime(trimEnd);
+        setIsPlaying(false);
+      }
+
       // 재생 중에도 duration이 0이거나 실제 값과 다르면 실시간 동기화
       const videoDuration = videoRef.current.duration;
       if (videoDuration) {
@@ -396,6 +427,7 @@ function App() {
 
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
+      videoRef.current.playbackRate = playbackSpeed;
       const dur = videoRef.current.duration;
       setDuration(dur);
       setTrimStart(0);
@@ -431,6 +463,13 @@ function App() {
       videoRef.current.pause();
       setIsPlaying(false);
     } else {
+      // 편집 모드에서 현재 시점이 trimEnd 오차범위 안이거나 trimStart 이전이면 trimStart 시점으로 자동 되감기 후 재생
+      if (isEditMode && trimEnd > 0) {
+        if (videoRef.current.currentTime >= trimEnd - 0.05 || videoRef.current.currentTime < trimStart) {
+          videoRef.current.currentTime = trimStart;
+          setCurrentTime(trimStart);
+        }
+      }
       videoRef.current.play().then(() => {
         setIsPlaying(true);
       }).catch(err => console.error("Error playing video:", err));
@@ -714,6 +753,12 @@ function App() {
   const handleTrimChange = (start: number, end: number) => {
     setTrimStart(start);
     setTrimEnd(end);
+    if (videoRef.current) {
+      if (videoRef.current.currentTime < start || videoRef.current.currentTime > end) {
+        videoRef.current.currentTime = start;
+        setCurrentTime(start);
+      }
+    }
   };
 
   // 현재 프레임을 이미지 파일로 캡처하여 저장 (바이너리 Vec<u8> 전달)
@@ -773,7 +818,7 @@ function App() {
   };
 
   // 비디오 편집 완료 후 인코딩/추출 프로세스 진행
-  const handleExport = async (fps: string, useCopy: boolean, crf: number) => {
+  const handleExport = async (fps: string, useCopy: boolean, crf: number, exportSpeed: number = 1.0) => {
     if (!filePath || duration === 0) return;
 
     // 기본 파일 이름 제안 (예: video_edited.mp4)
@@ -801,7 +846,7 @@ function App() {
       setIsExportModalOpen(false);
       setIsExporting(true);
 
-      // 백엔드 인코딩 호출 (용량 압축 수준 및 복제 여부 전달)
+      // 백엔드 인코딩 호출 (용량 압축 수준, 배속 및 복제 여부 전달)
       let cropX: number | null = null;
       let cropY: number | null = null;
       let cropW: number | null = null;
@@ -827,6 +872,8 @@ function App() {
         cropY,
         cropW,
         cropH,
+        exportSpeed,
+        isMuted: isEditMuted,
       });
 
       // 인앱 커스텀 토스트 알림 작동
@@ -848,8 +895,22 @@ function App() {
     }
   };
 
-  // 편집 모드 토글 (진입 시 비디오 정지 처리)
+  // 편집 모드 토글 (모드 전환 시 배속, 구간, 크롭, 음소거 등 편집 내역 전면 초기화)
   const handleToggleEdit = () => {
+    // 배속 및 음소거 초기화
+    setPlaybackSpeed(1.0);
+    setIsEditMuted(false);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = 1.0;
+      videoRef.current.muted = isMuted;
+    }
+    // 자르기 구간 및 크롭 영역 초기화
+    setTrimStart(0);
+    setTrimEnd(duration);
+    setIsCropMode(false);
+    setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
+    setCropAspectRatio("free");
+
     setIsEditMode((prev) => {
       const next = !prev;
       if (next) {
@@ -861,11 +922,6 @@ function App() {
         if (isImage) {
           setIsCropMode(true);
           setTimeout(updateVideoRect, 50);
-        }
-      } else {
-        // 편집 모드 해제 시 크롭 모드도 함께 비활성화
-        if (isImage) {
-          setIsCropMode(false);
         }
       }
       return next;
@@ -1009,6 +1065,7 @@ function App() {
         isExporting={isExporting}
         isCropMode={isCropMode}
         cropAreaRatio={isCropMode ? cropArea.w * cropArea.h : 1.0}
+        initialExportSpeed={playbackSpeed}
       />
 
       {/* 플로팅 컨트롤 바 */}
@@ -1041,6 +1098,11 @@ function App() {
         }}
         onCaptureFrame={handleCaptureFrame}
         isImage={isImage}
+        playbackSpeed={playbackSpeed}
+        onPlaybackSpeedChange={handlePlaybackSpeedChange}
+        videoSrc={videoSrc}
+        isEditMuted={isEditMuted}
+        onToggleEditMute={handleToggleEditMute}
       />
 
       {/* 추출 진행 중 모달 오버레이 */}

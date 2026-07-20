@@ -38,6 +38,11 @@ interface ControlBarProps {
   onToggleCrop: () => void;
   onCaptureFrame: () => void;
   isImage?: boolean;
+  playbackSpeed: number;
+  onPlaybackSpeedChange: (speed: number) => void;
+  videoSrc: string | null;
+  isEditMuted?: boolean;
+  onToggleEditMute?: () => void;
 }
 
 const formatTime = (seconds: number) => {
@@ -71,10 +76,52 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   isCropMode,
   onToggleCrop,
   onCaptureFrame,
-  isImage = false
+  isImage = false,
+  playbackSpeed,
+  onPlaybackSpeedChange,
+  videoSrc,
+  isEditMuted = false,
+  onToggleEditMute
 }) => {
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const containerRef = React.useRef<HTMLDivElement>(null);
+  
+  // 썸네일 미리보기 오프스크린 요소 Refs & States
+  const previewVideoRef = React.useRef<HTMLVideoElement>(null);
+  const previewCanvasRef = React.useRef<HTMLCanvasElement>(null);
+  const [hoverInfo, setHoverInfo] = React.useState<{ x: number; time: number } | null>(null);
+
+  // 마우스 타임라인 호버 시 썸네일 미리보기 시간 계산
+  const handleTimelineMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!hasVideo || duration === 0 || isImage) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const percent = x / rect.width;
+    const time = percent * duration;
+    setHoverInfo({ x, time });
+
+    if (previewVideoRef.current && Math.abs(previewVideoRef.current.currentTime - time) > 0.15) {
+      previewVideoRef.current.currentTime = time;
+    }
+  };
+
+  const handleTimelineMouseLeave = () => {
+    setHoverInfo(null);
+  };
+
+  // 미리보기 전용 비디오의 시킹이 완료되었을 때 캔버스에 프레임 렌더링
+  const handlePreviewSeeked = () => {
+    const video = previewVideoRef.current;
+    const canvas = previewCanvasRef.current;
+    if (!video || !canvas || video.videoWidth === 0) return;
+
+    canvas.width = 120;
+    canvas.height = Math.max(68, Math.round((video.videoHeight / video.videoWidth) * 120));
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    }
+  };
 
   // 마우스 드래그 핸들러 (편집바 세로스틱 & 재생핀 드래깅 처리)
   const startDrag = (type: "start" | "end" | "seek") => (e: React.MouseEvent) => {
@@ -103,7 +150,6 @@ export const ControlBar: React.FC<ControlBarProps> = ({
           }
         }
       } else if (type === "seek") {
-        // 재생핀은 자른 영역(trimStart ~ trimEnd) 내부에서만 움직이도록 바인딩
         const boundedTime = Math.max(trimStart, Math.min(trimEnd, time));
         onSeek(boundedTime);
       }
@@ -119,7 +165,6 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   };
 
   const handleTrackClick = (e: React.MouseEvent) => {
-    // 트랙 자체 영역을 눌렀을 때만 재생핀 이동 허용 (스틱이나 재생핀 요소를 직접 클릭한 경우는 제외)
     if (e.target !== e.currentTarget && !(e.target as HTMLElement).classList.contains("track-clickable")) {
       return;
     }
@@ -144,8 +189,20 @@ export const ControlBar: React.FC<ControlBarProps> = ({
         isVisible ? "translate-y-0" : "translate-y-[calc(100%+32px)] pointer-events-none"
       }`}
     >
+      {/* 썸네일 미리보기용 비디오 엘리먼트 (오프스크린) */}
+      {videoSrc && !isImage && (
+        <video
+          ref={previewVideoRef}
+          src={videoSrc}
+          muted
+          preload="auto"
+          onSeeked={handlePreviewSeeked}
+          className="hidden"
+        />
+      )}
+
       {/* Control Bar Container with Glassmorphism */}
-      <div className="flex flex-col gap-3 px-6 py-4 rounded-2xl bg-black/15 backdrop-blur-xl border border-white/5 shadow-xl">
+      <div className="relative flex flex-col gap-3 px-6 py-4 rounded-2xl bg-black/15 backdrop-blur-xl border border-white/5 shadow-xl">
         
         {/* Timeline Slider / Edit Trimming Slider */}
         {!isImage && (
@@ -156,7 +213,11 @@ export const ControlBar: React.FC<ControlBarProps> = ({
             
             {!isEditMode ? (
               /* 일반 모드: 재생 시커 슬라이더 */
-              <div className="relative flex-1 flex items-center h-5">
+              <div
+                className="relative flex-1 flex items-center h-5"
+                onMouseMove={handleTimelineMouseMove}
+                onMouseLeave={handleTimelineMouseLeave}
+              >
                 {/* 1. 회색 배경 트랙 */}
                 <div className="absolute left-0 right-0 h-1 bg-white/15 rounded-lg pointer-events-none"></div>
 
@@ -179,12 +240,33 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   onKeyUp={(e) => (e.currentTarget as HTMLInputElement).blur()}
                   className="absolute inset-0 w-full h-full bg-transparent appearance-none cursor-pointer focus:outline-none z-20 disabled:cursor-not-allowed"
                 />
+
+                {/* 재생바 마우스 호버 썸네일 & 타임코드 툴팁 (마우스 커서 바로 위 정중앙 정렬) */}
+                {hoverInfo && (
+                  <div
+                    className="absolute -top-[118px] pointer-events-none z-50 -translate-x-1/2 flex flex-col items-center transition-opacity duration-150 animate-fade-in"
+                    style={{ left: `${hoverInfo.x}px` }}
+                  >
+                    <div className="p-1 rounded-xl bg-neutral-900/90 border border-white/20 shadow-2xl backdrop-blur-md overflow-hidden flex flex-col items-center">
+                      <canvas
+                        ref={previewCanvasRef}
+                        className="w-[120px] rounded-lg bg-black border border-white/10 object-contain shadow-inner"
+                      />
+                      <span className="text-[10px] font-mono font-bold text-indigo-300 mt-1 px-2 py-0.5 rounded bg-white/10 tracking-wider">
+                        {formatTime(hoverInfo.time)}
+                      </span>
+                    </div>
+                    <div className="w-2 h-2 bg-neutral-900/90 border-r border-b border-white/20 rotate-45 -mt-1"></div>
+                  </div>
+                )}
               </div>
             ) : (
               /* 편집 모드: 마우스 드래깅 기반 커스텀 양방향 편집 슬라이더 */
               <div
                 ref={containerRef}
                 onClick={handleTrackClick}
+                onMouseMove={handleTimelineMouseMove}
+                onMouseLeave={handleTimelineMouseLeave}
                 className="relative flex-1 flex items-center h-5 select-none track-clickable cursor-pointer"
               >
                 {/* 1. 회색 배경 트랙 */}
@@ -199,21 +281,19 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   }}
                 ></div>
 
-                {/* 3. 재생 헤드 핀 (동그라미 아래에 세로 작대기 구조, 끝단이 트랙을 가리키도록 설정) */}
+                {/* 3. 재생 헤드 핀 */}
                 {duration > 0 && (
                   <div
                     className="absolute z-30 cursor-grab active:cursor-grabbing flex flex-col items-center -translate-x-1/2"
                     style={{ left: `${currentPercent}%`, top: '-16px' }}
                     onMouseDown={startDrag("seek")}
                   >
-                    {/* 머리 동그라미 */}
                     <div className="w-3 h-3 rounded-full bg-indigo-500 border border-white shadow"></div>
-                    {/* 아래 세로 작대기 (작대기 맨 끝인 10px 위치가 트랙 중심과 정확히 맞물림) */}
                     <div className="w-[2px] h-[14px] bg-indigo-500"></div>
                   </div>
                 )}
 
-                {/* 4. 편집 구간 자르기 조절 바 (두꺼운 세로 스틱) - 시작점 */}
+                {/* 4. 편집 구간 자르기 조절 바 - 시작점 */}
                 <div
                   className="absolute z-40 cursor-ew-resize flex items-center justify-center -translate-x-1/2 group/stick"
                   style={{ left: `${startPercent}%` }}
@@ -223,7 +303,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   <div className="w-[7px] h-5 bg-white border border-neutral-300 rounded shadow group-hover/stick:bg-indigo-300 active:bg-indigo-500 transition-colors"></div>
                 </div>
 
-                {/* 5. 편집 구간 자르기 조절 바 (두꺼운 세로 스틱) - 종료점 */}
+                {/* 5. 편집 구간 자르기 조절 바 - 종료점 */}
                 <div
                   className="absolute z-40 cursor-ew-resize flex items-center justify-center -translate-x-1/2 group/stick"
                   style={{ left: `${endPercent}%` }}
@@ -232,18 +312,37 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                 >
                   <div className="w-[7px] h-5 bg-white border border-neutral-300 rounded shadow group-hover/stick:bg-indigo-300 active:bg-indigo-500 transition-colors"></div>
                 </div>
+
+                {/* 편집 모드 마우스 호버 썸네일 & 타임코드 툴팁 */}
+                {hoverInfo && (
+                  <div
+                    className="absolute -top-[118px] pointer-events-none z-50 -translate-x-1/2 flex flex-col items-center transition-opacity duration-150 animate-fade-in"
+                    style={{ left: `${hoverInfo.x}px` }}
+                  >
+                    <div className="p-1 rounded-xl bg-neutral-900/90 border border-white/20 shadow-2xl backdrop-blur-md overflow-hidden flex flex-col items-center">
+                      <canvas
+                        ref={previewCanvasRef}
+                        className="w-[120px] rounded-lg bg-black border border-white/10 object-contain shadow-inner"
+                      />
+                      <span className="text-[10px] font-mono font-bold text-indigo-300 mt-1 px-2 py-0.5 rounded bg-white/10 tracking-wider">
+                        {formatTime(hoverInfo.time)}
+                      </span>
+                    </div>
+                    <div className="w-2 h-2 bg-neutral-900/90 border-r border-b border-white/20 rotate-45 -mt-1"></div>
+                  </div>
+                )}
               </div>
             )}
 
             <span className="text-[11px] font-mono text-white/70 select-none min-w-[35px]">
-              {formatTime(isEditMode ? trimEnd : duration)}
+              {formatTime(isEditMode ? (trimEnd - trimStart) / playbackSpeed : duration)}
             </span>
           </div>
         )}
 
         {/* Buttons and Sound Control */}
         <div className="grid grid-cols-3 items-center w-full">
-          {/* Left: Open & Edit Buttons (Icon Only) */}
+          {/* Left: Open & Edit Buttons */}
           <div className="flex items-center justify-start gap-2">
             <button
               onClick={(e) => {
@@ -336,48 +435,90 @@ export const ControlBar: React.FC<ControlBarProps> = ({
             )}
           </div>
 
-          {/* Right: Volume & Fullscreen */}
-          <div className="flex items-center justify-end gap-4">
-            {/* Volume Control */}
+          {/* Right: Playback Speed, Volume & Fullscreen */}
+          <div className="flex items-center justify-end gap-3">
+            {/* Speed Button (Click to cycle through 0.5x -> 0.75x -> 1.0x -> 1.25x -> 1.5x -> 2.0x) */}
             {!isImage && (
-              <div className="flex items-center gap-2">
+              <button
+                disabled={!hasVideo}
+                onClick={(e) => {
+                  const steps = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+                  const curIdx = steps.indexOf(playbackSpeed);
+                  const nextIdx = curIdx === -1 ? 2 : (curIdx + 1) % steps.length;
+                  onPlaybackSpeedChange(steps[nextIdx]);
+                  (e.currentTarget as HTMLButtonElement).blur();
+                }}
+                className={`px-2 py-1 rounded-lg border text-[11px] font-semibold font-mono transition-all duration-150 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                  playbackSpeed !== 1.0
+                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40 shadow-sm"
+                    : "text-white/80 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
+                }`}
+                title={isEditMode ? "클릭 시 편집 배속 변경 (0.5x ~ 2.0x)" : "클릭 시 시청 배속 변경 (0.5x ~ 2.0x)"}
+              >
+                {playbackSpeed.toFixed(2).replace(/\.00$/, "").replace(/\.50$/, ".5")}x
+              </button>
+            )}
+
+            {/* Volume Control in View Mode vs Mute Toggle Button in Edit Mode */}
+            {!isImage && (
+              !isEditMode ? (
+                /* 일반 감상 모드: 음소거 버튼 + 볼륨 슬라이더 */
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => {
+                      onToggleMute();
+                      (e.currentTarget as HTMLButtonElement).blur();
+                    }}
+                    disabled={!hasVideo}
+                    className="text-white/80 hover:text-white transition-colors duration-150 disabled:text-white/30 disabled:cursor-not-allowed cursor-pointer"
+                    title={isMuted ? "음소거 해제" : "음소거"}
+                  >
+                    {isMuted || volume === 0 ? <VolumeX className="w-4.5 h-4.5 text-rose-400" /> : <Volume2 className="w-4.5 h-4.5" />}
+                  </button>
+                  
+                  {/* Volume Slider Wrapper */}
+                  <div className="relative flex items-center h-5 w-16">
+                    <div className="absolute left-0 right-0 h-1 bg-white/15 rounded-lg pointer-events-none"></div>
+                    <div
+                      className="absolute left-0 h-1 bg-indigo-500 rounded-lg pointer-events-none z-10"
+                      style={{ width: `${(isMuted ? 0 : volume) * 100}%` }}
+                    ></div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={isMuted ? 0 : volume}
+                      disabled={!hasVideo}
+                      onChange={(e) => onVolumeChange(Number(e.target.value))}
+                      onMouseUp={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                      onKeyUp={(e) => (e.currentTarget as HTMLInputElement).blur()}
+                      className="absolute inset-0 w-full h-full bg-transparent appearance-none cursor-pointer focus:outline-none z-20 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+              ) : (
+                /* 편집 모드: 사운드 슬라이더 제거 및 아이콘 전용 음소거 토글 버튼 제공 */
                 <button
                   onClick={(e) => {
-                    onToggleMute();
+                    if (onToggleEditMute) onToggleEditMute();
                     (e.currentTarget as HTMLButtonElement).blur();
                   }}
                   disabled={!hasVideo}
-                  className="text-white/80 hover:text-white transition-colors duration-150 disabled:text-white/30 disabled:cursor-not-allowed cursor-pointer"
+                  className={`flex items-center justify-center p-1.5 rounded-lg border transition-all duration-150 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                    isEditMuted
+                      ? "text-rose-400 bg-rose-500/20 border-rose-500/40"
+                      : "text-white/80 bg-white/5 hover:bg-white/15 border-white/5"
+                  }`}
+                  title={isEditMuted ? "편집 음소거 켜짐 (오디오 트랙 없이 저장)" : "편집 음소거 끔 (원본 소리로 저장)"}
                 >
-                  {isMuted || volume === 0 ? <VolumeX className="w-4.5 h-4.5" /> : <Volume2 className="w-4.5 h-4.5" />}
+                  {isEditMuted ? (
+                    <VolumeX className="w-4.5 h-4.5 text-rose-400" />
+                  ) : (
+                    <Volume2 className="w-4.5 h-4.5 text-white/80" />
+                  )}
                 </button>
-                
-                {/* Volume Slider Wrapper with Constant Width */}
-                <div className="relative flex items-center h-5 w-20">
-                  {/* 1. Gray Background Track */}
-                  <div className="absolute left-0 right-0 h-1 bg-white/15 rounded-lg pointer-events-none"></div>
-
-                  {/* 2. Blue Progress Track */}
-                  <div
-                    className="absolute left-0 h-1 bg-indigo-500 rounded-lg pointer-events-none z-10"
-                    style={{ width: `${(isMuted ? 0 : volume) * 100}%` }}
-                  ></div>
-
-                  {/* 3. Invisible range input on top */}
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={isMuted ? 0 : volume}
-                    disabled={!hasVideo}
-                    onChange={(e) => onVolumeChange(Number(e.target.value))}
-                    onMouseUp={(e) => (e.currentTarget as HTMLInputElement).blur()}
-                    onKeyUp={(e) => (e.currentTarget as HTMLInputElement).blur()}
-                    className="absolute inset-0 w-full h-full bg-transparent appearance-none cursor-pointer focus:outline-none z-20 disabled:cursor-not-allowed"
-                  />
-                </div>
-              </div>
+              )
             )}
 
             {/* Fullscreen */}
