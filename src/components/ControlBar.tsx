@@ -12,6 +12,7 @@ import {
   Crop,
   Camera
 } from "lucide-react";
+import { SpriteSheetInfo } from "../App";
 
 interface ControlBarProps {
   isPlaying: boolean;
@@ -43,6 +44,7 @@ interface ControlBarProps {
   videoSrc: string | null;
   isEditMuted?: boolean;
   onToggleEditMute?: () => void;
+  spriteData?: SpriteSheetInfo | null;
 }
 
 const formatTime = (seconds: number) => {
@@ -81,7 +83,8 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onPlaybackSpeedChange,
   videoSrc,
   isEditMuted = false,
-  onToggleEditMute
+  onToggleEditMute,
+  spriteData
 }) => {
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -241,17 +244,41 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   className="absolute inset-0 w-full h-full bg-transparent appearance-none cursor-pointer focus:outline-none z-20 disabled:cursor-not-allowed"
                 />
 
-                {/* 재생바 마우스 호버 썸네일 & 타임코드 툴팁 (마우스 커서 바로 위 정중앙 정렬) */}
+                {/* 재생바 마우스 호버 썸네일 & 타임코드 툴팁 (하이브리드: Canvas fallback -> GPU Sprite Sheet) */}
                 {hoverInfo && (
                   <div
                     className="absolute -top-[118px] pointer-events-none z-50 -translate-x-1/2 flex flex-col items-center transition-opacity duration-150 animate-fade-in"
                     style={{ left: `${hoverInfo.x}px` }}
                   >
                     <div className="p-1 rounded-xl bg-neutral-900/90 border border-white/20 shadow-2xl backdrop-blur-md overflow-hidden flex flex-col items-center">
-                      <canvas
-                        ref={previewCanvasRef}
-                        className="w-[120px] rounded-lg bg-black border border-white/10 object-contain shadow-inner"
-                      />
+                      {spriteData && spriteData.sprite_url ? (
+                        (() => {
+                          const thumbIndex = Math.min(
+                            spriteData.total_count - 1,
+                            Math.max(0, Math.floor(hoverInfo.time / spriteData.interval))
+                          );
+                          const col = thumbIndex % spriteData.cols;
+                          const row = Math.floor(thumbIndex / spriteData.cols);
+                          const bgX = -col * spriteData.tile_width;
+                          const bgY = -row * spriteData.tile_height;
+
+                          return (
+                            <div
+                              className="w-[120px] h-[68px] rounded-lg border border-white/10 shadow-inner bg-no-repeat overflow-hidden"
+                              style={{
+                                backgroundImage: `url(${spriteData.sprite_url})`,
+                                backgroundPosition: `${bgX}px ${bgY}px`,
+                                backgroundSize: `${spriteData.cols * spriteData.tile_width}px ${spriteData.rows * spriteData.tile_height}px`
+                              }}
+                            />
+                          );
+                        })()
+                      ) : (
+                        <canvas
+                          ref={previewCanvasRef}
+                          className="w-[120px] rounded-lg bg-black border border-white/10 object-contain shadow-inner"
+                        />
+                      )}
                       <span className="text-[10px] font-mono font-bold text-indigo-300 mt-1 px-2 py-0.5 rounded bg-white/10 tracking-wider">
                         {formatTime(hoverInfo.time)}
                       </span>
@@ -313,17 +340,41 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   <div className="w-[7px] h-5 bg-white border border-neutral-300 rounded shadow group-hover/stick:bg-indigo-300 active:bg-indigo-500 transition-colors"></div>
                 </div>
 
-                {/* 편집 모드 마우스 호버 썸네일 & 타임코드 툴팁 */}
+                {/* 편집 모드 마우스 호버 썸네일 & 타임코드 툴팁 (하이브리드) */}
                 {hoverInfo && (
                   <div
                     className="absolute -top-[118px] pointer-events-none z-50 -translate-x-1/2 flex flex-col items-center transition-opacity duration-150 animate-fade-in"
                     style={{ left: `${hoverInfo.x}px` }}
                   >
                     <div className="p-1 rounded-xl bg-neutral-900/90 border border-white/20 shadow-2xl backdrop-blur-md overflow-hidden flex flex-col items-center">
-                      <canvas
-                        ref={previewCanvasRef}
-                        className="w-[120px] rounded-lg bg-black border border-white/10 object-contain shadow-inner"
-                      />
+                      {spriteData && spriteData.sprite_url ? (
+                        (() => {
+                          const thumbIndex = Math.min(
+                            spriteData.total_count - 1,
+                            Math.max(0, Math.floor(hoverInfo.time / spriteData.interval))
+                          );
+                          const col = thumbIndex % spriteData.cols;
+                          const row = Math.floor(thumbIndex / spriteData.cols);
+                          const bgX = -col * spriteData.tile_width;
+                          const bgY = -row * spriteData.tile_height;
+
+                          return (
+                            <div
+                              className="w-[120px] h-[68px] rounded-lg border border-white/10 shadow-inner bg-no-repeat overflow-hidden"
+                              style={{
+                                backgroundImage: `url(${spriteData.sprite_url})`,
+                                backgroundPosition: `${bgX}px ${bgY}px`,
+                                backgroundSize: `${spriteData.cols * spriteData.tile_width}px ${spriteData.rows * spriteData.tile_height}px`
+                              }}
+                            />
+                          );
+                        })()
+                      ) : (
+                        <canvas
+                          ref={previewCanvasRef}
+                          className="w-[120px] rounded-lg bg-black border border-white/10 object-contain shadow-inner"
+                        />
+                      )}
                       <span className="text-[10px] font-mono font-bold text-indigo-300 mt-1 px-2 py-0.5 rounded bg-white/10 tracking-wider">
                         {formatTime(hoverInfo.time)}
                       </span>

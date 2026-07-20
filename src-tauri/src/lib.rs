@@ -324,6 +324,115 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+// 백그라운드 스프라이트 시트 메타데이터 구조체
+#[derive(serde::Serialize)]
+struct SpriteSheetInfo {
+    sprite_path: String,
+    tile_width: u32,
+    tile_height: u32,
+    cols: u32,
+    rows: u32,
+    interval: f64,
+    total_count: u32,
+}
+
+// 백그라운드에서 동영상의 저해상도 썸네일 그리드 스프라이트 시트를 생성하는 커맨드
+#[tauri::command]
+async fn generate_sprite_sheet(
+    app_handle: tauri::AppHandle,
+    input_path: String,
+    duration: f64,
+) -> Result<SpriteSheetInfo, String> {
+    if duration <= 0.0 {
+        return Err("유효하지 않은 동영상 길이입니다.".to_string());
+    }
+
+    // 1. 썸네일 추출 간격 결정 (60초 이내: 1초, 300초 이내: 2초, 그 이상: 5초)
+    let interval = if duration <= 60.0 {
+        1.0
+    } else if duration <= 300.0 {
+        2.0
+    } else {
+        5.0
+    };
+
+    let total_count = (duration / interval).ceil() as u32;
+    let total_count = total_count.max(1).min(120); // 최대 120개 썸네일로 제한하여 초고속 생성
+    let cols = 10u32;
+    let rows = (total_count + cols - 1) / cols;
+    let tile_width = 120u32;
+    let tile_height = 68u32;
+
+    // 2. 임시 캐시 디렉토리 및 파일 경로 생성 (파일명 해시 활용)
+    let temp_dir = std::env::temp_dir().join("okita_sprites");
+    let _ = fs::create_dir_all(&temp_dir);
+
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    input_path.hash(&mut hasher);
+    duration.to_bits().hash(&mut hasher);
+    let file_hash = hasher.finish();
+
+    let sprite_path = temp_dir.join(format!("sprite_{}.jpg", file_hash));
+    let sprite_path_str = sprite_path.to_string_lossy().to_string();
+
+    // 3. 기존에 캐시된 파일이 이미 존재하는 경우 재사용하여 0ms 반환
+    if sprite_path.exists() {
+        if let Ok(meta) = fs::metadata(&sprite_path) {
+            if meta.len() > 0 {
+                return Ok(SpriteSheetInfo {
+                    sprite_path: sprite_path_str,
+                    tile_width,
+                    tile_height,
+                    cols,
+                    rows,
+                    interval,
+                    total_count,
+                });
+            }
+        }
+    }
+
+    // 4. FFmpeg 비동기 타일링 실행
+    let ffmpeg = get_ffmpeg_path(&app_handle);
+    let mut cmd = Command::new(&ffmpeg);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    cmd.arg("-y");
+    cmd.arg("-ss").arg("0");
+    cmd.arg("-i").arg(&input_path);
+
+    let vf_filter = format!("fps=1/{:.2},scale=120:-1,tile={}x{}", interval, cols, rows);
+    cmd.arg("-vf").arg(vf_filter);
+    cmd.arg("-vframes").arg("1");
+    cmd.arg("-q:v").arg("5"); // 적절한 JPEG 용량 최적화 품질
+    cmd.arg(&sprite_path_str);
+
+    let output = cmd.output();
+
+    match output {
+        Ok(out) => {
+            if out.status.success() && sprite_path.exists() {
+                Ok(SpriteSheetInfo {
+                    sprite_path: sprite_path_str,
+                    tile_width,
+                    tile_height,
+                    cols,
+                    rows,
+                    interval,
+                    total_count,
+                })
+            } else {
+                let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                Err(format!("스프라이트 생성 실패: {}", stderr))
+            }
+        }
+        Err(e) => Err(format!("FFmpeg 실행 실패: {}", e)),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -348,7 +457,8 @@ pub fn run() {
             save_frame,
             get_startup_file,
             get_neighbor_files,
-            export_image
+            export_image,
+            generate_sprite_sheet
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

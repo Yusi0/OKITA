@@ -24,6 +24,17 @@ const isNewerVersion = (current: string, latest: string) => {
   return false;
 };
 
+export interface SpriteSheetInfo {
+  sprite_path: string;
+  sprite_url?: string;
+  tile_width: number;
+  tile_height: number;
+  cols: number;
+  rows: number;
+  interval: number;
+  total_count: number;
+}
+
 function App() {
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [filePath, setFilePath] = useState<string | null>(null); // 원본 절대 경로 저장
@@ -56,6 +67,8 @@ function App() {
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   // 편집 음소거 상태 정의 (기본 false)
   const [isEditMuted, setIsEditMuted] = useState<boolean>(false);
+  // 백그라운드 스프라이트 시트 메타데이터 상태
+  const [spriteData, setSpriteData] = useState<SpriteSheetInfo | null>(null);
 
   const handlePlaybackSpeedChange = (speed: number) => {
     setPlaybackSpeed(speed);
@@ -432,6 +445,24 @@ function App() {
       setDuration(dur);
       setTrimStart(0);
       setTrimEnd(dur);
+
+      // 백그라운드 스레드에서 스프라이트 시트 비동기 생성 호출
+      if (filePath && dur > 0 && !isImage) {
+        setSpriteData(null);
+        invoke<SpriteSheetInfo>("generate_sprite_sheet", {
+          inputPath: filePath,
+          duration: dur,
+        })
+          .then((res) => {
+            setSpriteData({
+              ...res,
+              sprite_url: convertFileSrc(res.sprite_path),
+            });
+          })
+          .catch((err) => {
+            console.warn("Sprite sheet generation skipped or failed:", err);
+          });
+      }
 
       // 자동 재생이 설정되어 있다면 메타데이터가 로딩되자마자 재생 실행
       if (isPlaying) {
@@ -1103,6 +1134,7 @@ function App() {
         videoSrc={videoSrc}
         isEditMuted={isEditMuted}
         onToggleEditMute={handleToggleEditMute}
+        spriteData={spriteData}
       />
 
       {/* 추출 진행 중 모달 오버레이 */}
