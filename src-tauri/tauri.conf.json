@@ -56,6 +56,31 @@
         "name": "OKITA Video",
         "description": "Video file openable by OKITA Player",
         "role": "Viewer"
+      },
+      {
+        "ext": [
+          "gif",
+          "webp",
+          "png",
+          "jpg",
+          "jpeg"
+        ],
+        "name": "OKITA Image & Animation",
+        "description": "Animated GIF/WebP and image file openable by OKITA Player",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "mp3",
+          "wav",
+          "m4a",
+          "flac",
+          "aac",
+          "ogg"
+        ],
+        "name": "OKITA Audio",
+        "description": "Audio file openable by OKITA Player",
+        "role": "Viewer"
       }
     ],
     "externalBin": [
