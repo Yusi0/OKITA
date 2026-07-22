@@ -6,9 +6,13 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { TitleBar } from "./components/TitleBar";
-import { ControlBar } from "./components/ControlBar";
-import { ExportModal } from "./components/ExportModal";
+import { ControlBar, ClipSegment } from "./components/ControlBar";
+import { ExportModal, ExportOptions } from "./components/ExportModal";
 import { CropOverlay } from "./components/CropOverlay";
+import { AudioVisualizer } from "./components/AudioVisualizer";
+import { AnimatedGifBadge } from "./components/AnimatedGifBadge";
+import { ContextMenu } from "./components/ContextMenu";
+import { InfoModal } from "./components/InfoModal";
 import { Video, Film, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import "./App.css";
 
@@ -23,17 +27,6 @@ const isNewerVersion = (current: string, latest: string) => {
   }
   return false;
 };
-
-export interface SpriteSheetInfo {
-  sprite_path: string;
-  sprite_url?: string;
-  tile_width: number;
-  tile_height: number;
-  cols: number;
-  rows: number;
-  interval: number;
-  total_count: number;
-}
 
 function App() {
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
@@ -67,27 +60,134 @@ function App() {
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   // 편집 음소거 상태 정의 (기본 false)
   const [isEditMuted, setIsEditMuted] = useState<boolean>(false);
-  // 백그라운드 스프라이트 시트 메타데이터 상태
-  const [spriteData, setSpriteData] = useState<SpriteSheetInfo | null>(null);
+
+  // v0.2.0 멀티 클립 타임라인 관련 상태 및 동기식 useRef 히스토리 스택 정의
+  const [clips, setClips] = useState<ClipSegment[]>([]);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [dropInsertIndex, setDropInsertIndex] = useState<number | null>(null);
+  const [isDragOver, setIsDragOver] = useState<boolean>(false);
+  
+  const historyRef = useRef<ClipSegment[][]>([]);
+  const historyIndexRef = useRef<number>(-1);
+  const dropInsertIndexRef = useRef<number | null>(null);
+  dropInsertIndexRef.current = dropInsertIndex;
+
+  const isEditModeRef = useRef<boolean>(isEditMode);
+  isEditModeRef.current = isEditMode;
+
+  const clipsRef = useRef<ClipSegment[]>(clips);
+  clipsRef.current = clips;
+
+  // 듀얼 A/B 비디오 플레이어 및 순차 재생 상태 관리 Refs
+  const [activePlayer, setActivePlayer] = useState<"A" | "B">("A");
+  const activePlayerRef = useRef<"A" | "B">("A");
+  activePlayerRef.current = activePlayer;
+
+  // 커스텀 우클릭 컨텍스트 메뉴 및 정보 모달 상태
+  const [contextMenu, setContextMenu] = useState<{ isOpen: boolean; x: number; y: number }>({ isOpen: false, x: 0, y: 0 });
+  const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
+  const [infoModalTab, setInfoModalTab] = useState<"keybinds" | "about">("keybinds");
+
+  const handleOpenInfoModal = (tab: "keybinds" | "about") => {
+    setInfoModalTab(tab);
+    setIsInfoModalOpen(true);
+  };
+
+  const videoRefA = useRef<HTMLVideoElement>(null);
+  const videoRefB = useRef<HTMLVideoElement>(null);
+
+  const lastValidDropIndexRef = useRef<number | null>(null);
+  const currentClipIndexRef = useRef<number>(0);
+  const lastDropTimeRef = useRef<number>(0);
+
+  const getActiveVideo = (): HTMLVideoElement | null => {
+    return activePlayerRef.current === "A" ? videoRefA.current : videoRefB.current;
+  };
+
+  const getStandbyVideo = (): HTMLVideoElement | null => {
+    return activePlayerRef.current === "A" ? videoRefB.current : videoRefA.current;
+  };
+
+  // 장기 누름 2배속 모드(Space 및 영상 꾹 누르기) 관련 상태 및 참조 정의
+  const [is2xActive, setIs2xActive] = useState<boolean>(false);
+  const is2xActiveRef = useRef<boolean>(false);
+  is2xActiveRef.current = is2xActive;
+
+  const originalSpeedRef = useRef<number>(1.0);
+  const spaceTimeoutRef = useRef<number | null>(null);
+  const videoPressTimeoutRef = useRef<number | null>(null);
+  const isSpaceLongPressRef = useRef<boolean>(false);
+  const isVideoLongPressRef = useRef<boolean>(false);
+  const wasVideoLongPressRef = useRef<boolean>(false);
+
+  const isPlayingRef = useRef<boolean>(isPlaying);
+  isPlayingRef.current = isPlaying;
+
+  const activate2xRef = useRef<() => void>(() => {});
+  const deactivate2xRef = useRef<() => void>(() => {});
+
+  const activate2xSpeed = () => {
+    if (!isPlayingRef.current) return;
+    setIs2xActive(true);
+    originalSpeedRef.current = playbackSpeed;
+    const active = getActiveVideo();
+    if (active) {
+      active.playbackRate = 2.0;
+    }
+  };
+
+  const deactivate2xSpeed = () => {
+    setIs2xActive(false);
+    const active = getActiveVideo();
+    if (active) {
+      active.playbackRate = originalSpeedRef.current;
+    }
+  };
+
+  activate2xRef.current = activate2xSpeed;
+  deactivate2xRef.current = deactivate2xSpeed;
+
+  // 연속 클립 점프 중 중복 시크 루프 방지용 락 가드
+  const isJumpingRef = useRef<boolean>(false);
+
+  // 외부 미디어 에셋 로드 시 재생 시간(duration)을 비동기로 측정하는 헬퍼
+  const getAssetDuration = (path: string): Promise<number> => {
+    return new Promise((resolve) => {
+      const isImg = /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(path);
+      if (isImg) {
+        resolve(5.0);
+        return;
+      }
+      const tempVideo = document.createElement("video");
+      tempVideo.src = convertFileSrc(path);
+      tempVideo.onloadedmetadata = () => {
+        resolve(tempVideo.duration || 5.0);
+      };
+      tempVideo.onerror = () => {
+        resolve(5.0);
+      };
+    });
+  };
 
   const handlePlaybackSpeedChange = (speed: number) => {
     setPlaybackSpeed(speed);
-    if (videoRef.current) {
-      videoRef.current.playbackRate = speed;
+    const active = getActiveVideo();
+    if (active) {
+      active.playbackRate = speed;
     }
   };
 
   const handleToggleEditMute = () => {
     setIsEditMuted((prev) => {
       const next = !prev;
-      if (videoRef.current) {
-        videoRef.current.muted = next || isMuted;
+      const active = getActiveVideo();
+      if (active) {
+        active.muted = next || isMuted;
       }
       return next;
     });
   };
 
-  const videoRef = useRef<HTMLVideoElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const controlsTimeoutRef = useRef<number | null>(null);
 
@@ -99,8 +199,10 @@ function App() {
   const [updateInfo, setUpdateInfo] = useState<{ version: string; url: string; notes?: string } | null>(null);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
 
-  // 현재 파일이 이미지 포맷인지 여부 판별 헬퍼
+  // 현재 파일 포맷 타입 판별 헬퍼
+  const isAudio = filePath ? /\.(mp3|m4a|wav|flac|aac|ogg|opus|wma)$/i.test(filePath) : false;
   const isImage = filePath ? /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(filePath) : false;
+  const isAnimatedGif = filePath ? /\.(gif|webp)$/i.test(filePath) : false;
 
   // 실제 렌더링된 미디어 사각형 영역 계산 (레터박스/필러박스 제외, 비디오 및 이미지 통합 지원)
   const calculateMediaRenderRect = () => {
@@ -135,8 +237,8 @@ function App() {
         height: renderHeight
       } as DOMRect;
     } else {
-      if (!videoRef.current) return null;
-      const video = videoRef.current;
+      const video = getActiveVideo();
+      if (!video) return null;
       const rect = video.getBoundingClientRect();
       if (video.videoWidth === 0) return null;
       
@@ -198,7 +300,7 @@ function App() {
   useEffect(() => {
     if (!isCropMode || !videoSrc) return;
     
-    const targetElement = isImage ? imageRef.current : videoRef.current;
+    const targetElement = isImage ? imageRef.current : getActiveVideo();
     if (!targetElement) return;
 
     // 초기 계산 실행
@@ -226,19 +328,124 @@ function App() {
     }
   }, [isEditMode]);
 
-  // 바탕화면 및 탐색기 드래그 앤 드롭 파일 수신 로직
+  // 바탕화면 및 탐색기 드래그 앤 드롭 파일 수신 로직 (편집 모드 시 프리미어 프로 스타일 타임라인 삽입)
   useEffect(() => {
-    let unlistenFn: (() => void) | null = null;
+    let active = true;
+    let unsubOver: (() => void) | null = null;
+    let unsubLeave: (() => void) | null = null;
+    let unsubDrop: (() => void) | null = null;
     
     const setupDragDrop = async () => {
       try {
-        const unlisten = await listen<{ paths: string[] }>("tauri://drag-drop", (event) => {
+        const unlistenOver = await listen<{ position?: { x: number; y: number } }>("tauri://drag-over", (event) => {
+          if (!active) return;
+          setIsDragOver(true);
+          if (isEditModeRef.current && clipsRef.current.length > 0) {
+            const pos = event.payload?.position;
+            const mouseX = pos ? pos.x : window.innerWidth / 2;
+            const windowWidth = window.innerWidth;
+            const timelineWidth = Math.min(windowWidth * 0.9, 896);
+            const timelineLeft = (windowWidth - timelineWidth) / 2;
+            const mouseRatio = Math.max(0, Math.min(1, (mouseX - timelineLeft) / timelineWidth));
+
+            const currentClips = clipsRef.current;
+            const totalEditedDuration = currentClips.reduce((acc, c) => acc + (c.end - c.start), 0);
+
+            if (totalEditedDuration > 0) {
+              let accum = 0;
+              const boundaries = [0];
+              for (const c of currentClips) {
+                accum += (c.end - c.start);
+                boundaries.push(accum / totalEditedDuration);
+              }
+
+              let closestIdx = 0;
+              let minDiff = Infinity;
+              for (let i = 0; i < boundaries.length; i++) {
+                const diff = Math.abs(boundaries[i] - mouseRatio);
+                if (diff < minDiff) {
+                  minDiff = diff;
+                  closestIdx = i;
+                }
+              }
+              setDropInsertIndex(closestIdx);
+              lastValidDropIndexRef.current = closestIdx;
+            }
+          }
+        });
+        if (!active) {
+          unlistenOver();
+          return;
+        }
+        unsubOver = unlistenOver;
+
+        const unlistenLeave = await listen("tauri://drag-leave", () => {
+          if (!active) return;
+          setIsDragOver(false);
+          setDropInsertIndex(null);
+        });
+        if (!active) {
+          unlistenLeave();
+          return;
+        }
+        unsubLeave = unlistenLeave;
+
+        const unlistenDrop = await listen<{ paths: string[] }>("tauri://drag-drop", async (event) => {
+          if (!active) return;
+          setIsDragOver(false);
+
+          // 중복 드롭 방지 (500ms 가드타임)
+          const now = Date.now();
+          if (now - lastDropTimeRef.current < 500) {
+            return;
+          }
+          lastDropTimeRef.current = now;
+
           const payload = event.payload;
           if (payload && payload.paths && payload.paths.length > 0) {
             const droppedPath = payload.paths[0];
-            
-            const isSupported = /\.(mp4|webm|mkv|avi|mov|ogv|3gp|png|jpg|jpeg|webp|gif|bmp)$/i.test(droppedPath);
-            if (isSupported) {
+            const isSupported = /\.(mp4|webm|mkv|avi|mov|ogv|3gp|png|jpg|jpeg|webp|gif|bmp|mp3|m4a|wav|flac|aac|ogg|opus|wma)$/i.test(droppedPath);
+            if (!isSupported) return;
+
+            if (isEditModeRef.current && clipsRef.current.length > 0) {
+              // 타깃 위치 인덱스를 비동기 await 실행 전에 미리 동기식으로 취득 및 리셋하여 중복 실행 원천 봉쇄
+              const targetIdx =
+                lastValidDropIndexRef.current !== null
+                  ? lastValidDropIndexRef.current
+                  : dropInsertIndexRef.current !== null
+                  ? dropInsertIndexRef.current
+                  : clipsRef.current.length;
+              lastValidDropIndexRef.current = null;
+              setDropInsertIndex(null);
+
+              // 편집 모드: 프리미어 프로 스타일 가상 타임라인 클립 리플 삽입
+              const dur = await getAssetDuration(droppedPath);
+              const name = droppedPath.split(/[/\\]/).pop() || "asset";
+              const newClip: ClipSegment = {
+                id: `clip-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                filePath: droppedPath,
+                start: 0,
+                end: dur,
+                title: name,
+              };
+
+              const nextClips = [...clipsRef.current];
+              nextClips.splice(targetIdx, 0, newClip);
+
+              pushHistory(nextClips);
+              setSelectedClipId(newClip.id);
+
+              // 새로 삽입된 에셋 위치로 타임라인 마스터 시계 및 플레이헤드 즉시 이동
+              let insertedTimelineStart = 0;
+              for (let i = 0; i < targetIdx; i++) {
+                insertedTimelineStart += (nextClips[i].end - nextClips[i].start);
+              }
+              currentClipIndexRef.current = targetIdx;
+              setSmoothTime(insertedTimelineStart);
+              setCurrentTime(insertedTimelineStart);
+              smoothTimeRef.current = insertedTimelineStart;
+            } else {
+              // 일반 감상 모드: 신규 미디어 로드
               const fileUrl = convertFileSrc(droppedPath);
               const parts = droppedPath.split(/[/\\]/);
               const name = parts[parts.length - 1];
@@ -262,18 +469,23 @@ function App() {
               const isDroppedImage = /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(droppedPath);
               if (!isDroppedImage) {
                 setTimeout(() => {
-                  if (videoRef.current) {
-                    videoRef.current.load();
-                    videoRef.current.play().then(() => {
+                  const v = getActiveVideo();
+                  if (v) {
+                    v.load();
+                    v.play().then(() => {
                       setIsPlaying(true);
-                    }).catch(e => console.warn("Auto-play failed:", e));
+                    }).catch((e: unknown) => console.warn("Auto-play failed:", e));
                   }
                 }, 50);
               }
             }
           }
         });
-        unlistenFn = unlisten;
+        if (!active) {
+          unlistenDrop();
+          return;
+        }
+        unsubDrop = unlistenDrop;
       } catch (err) {
         console.error("드래그 앤 드롭 이벤트 등록 실패:", err);
       }
@@ -282,9 +494,10 @@ function App() {
     setupDragDrop();
 
     return () => {
-      if (unlistenFn) {
-        unlistenFn();
-      }
+      active = false;
+      if (unsubOver) unsubOver();
+      if (unsubLeave) unsubLeave();
+      if (unsubDrop) unsubDrop();
     };
   }, []);
 
@@ -348,23 +561,27 @@ function App() {
     checkStartupFile();
   }, []);
 
-  // isPlaying 상태와 실제 비디오 엘리먼트 재생 상태 동기화
+  // isPlaying 상태 및 볼륨/음소거와 실제 미디어 엘리먼트 재생 상태 동기화
   useEffect(() => {
-    if (!videoRef.current || !videoSrc) return;
+    const active = getActiveVideo();
+    if (!active || !videoSrc) return;
+
+    active.volume = volume;
+    active.muted = isMuted || isEditMuted;
 
     if (isPlaying) {
-      if (videoRef.current.paused) {
-        videoRef.current.play().catch((err) => {
+      if (active.paused) {
+        active.play().catch((err: unknown) => {
           console.warn("Autoplay in useEffect was blocked or failed:", err);
           setIsPlaying(false);
         });
       }
     } else {
-      if (!videoRef.current.paused) {
-        videoRef.current.pause();
+      if (!active.paused) {
+        active.pause();
       }
     }
-  }, [isPlaying, videoSrc]);
+  }, [isPlaying, videoSrc, activePlayer, volume, isMuted, isEditMuted]);
 
   // 마우스 이동 시 컨트롤 바 표시 및 자동 숨김 타이머 설정
   const handleMouseMove = () => {
@@ -372,18 +589,24 @@ function App() {
     if (controlsTimeoutRef.current) {
       window.clearTimeout(controlsTimeoutRef.current);
     }
-    // 비디오가 로드된 상태이고, 편집 모드가 아닐 때만 2.5초 후 숨김
+    // 미디어가 로드된 상태이고, 편집 모드가 아닐 때 자동 숨김 (사진/움짤: 1초, 비디오: 2.5초)
     if (videoSrc && !isEditMode) {
+      const hideDelay = isImage ? 1000 : 2500;
       controlsTimeoutRef.current = window.setTimeout(() => {
         setIsControlsVisible(false);
-      }, 2500);
+      }, hideDelay);
     }
   };
 
-  // 마우스가 윈도우 밖으로 나가면 컨트롤 바 숨김
+  // 마우스가 윈도우 밖으로 나가면 컨트롤 바 즉시 숨김
   const handleMouseLeave = () => {
-    if (videoSrc && isPlaying && !isEditMode) {
-      setIsControlsVisible(false);
+    if (videoSrc && !isEditMode) {
+      if (isImage || isPlaying) {
+        if (controlsTimeoutRef.current) {
+          window.clearTimeout(controlsTimeoutRef.current);
+        }
+        setIsControlsVisible(false);
+      }
     }
   };
 
@@ -392,13 +615,162 @@ function App() {
     handleMouseMove();
   }, [isPlaying, videoSrc]);
 
+  const smoothTimeRef = useRef<number>(0);
+
+  // 외부 파일 경로 에셋 URL 얻기 헬퍼
+  const getClipSrc = (clip: ClipSegment): string => {
+    if (clip.filePath && clip.filePath.trim().length > 0) {
+      return convertFileSrc(clip.filePath);
+    }
+    return videoSrc || "";
+  };
+
+  // 마스터 타임라인 시간 -> 해당 클립 및 내부 미디어 타임스탬프 계산 헬퍼
+  const getClipAtTimelineTime = (timelineT: number, currentClips: ClipSegment[]) => {
+    if (!currentClips || currentClips.length === 0) return null;
+    let accum = 0;
+    for (let i = 0; i < currentClips.length; i++) {
+      const c = currentClips[i];
+      const dur = c.end - c.start;
+      if (timelineT >= accum && (timelineT <= accum + dur || i === currentClips.length - 1)) {
+        const offset = Math.max(0, Math.min(dur, timelineT - accum));
+        return {
+          clipIndex: i,
+          clip: c,
+          clipTimelineStart: accum,
+          clipTimelineEnd: accum + dur,
+          internalTime: c.start + offset,
+        };
+      }
+      accum += dur;
+    }
+    return null;
+  };
+
+  // 편집 모드 시 멀티 클립 실시간 자동 범위 및 듀얼 플레이어 0ms 갭 스왑 60fps 검사
+  const checkClipBoundsAndJump = (timelineT: number) => {
+    if (!isEditMode || !isPlaying || clips.length === 0 || isJumpingRef.current) return;
+
+    const totalEditedDuration = clips.reduce((acc, c) => acc + (c.end - c.start), 0);
+    const activeVideo = getActiveVideo();
+    const standbyVideo = getStandbyVideo();
+    if (!activeVideo) return;
+
+    // 전체 타임라인 종점 도달 ➔ 정지 및 첫 클립 복귀
+    if (timelineT >= totalEditedDuration - 0.04) {
+      activeVideo.pause();
+      if (standbyVideo) standbyVideo.pause();
+      setIsPlaying(false);
+
+      currentClipIndexRef.current = 0;
+      const firstClip = clips[0];
+      const firstSrc = getClipSrc(firstClip);
+      if (activeVideo.src !== firstSrc) activeVideo.src = firstSrc;
+      activeVideo.currentTime = firstClip.start;
+
+      setSmoothTime(0);
+      setCurrentTime(0);
+      smoothTimeRef.current = 0;
+      return;
+    }
+
+    const clipIndex = currentClipIndexRef.current;
+    if (clipIndex < 0 || clipIndex >= clips.length) return;
+
+    let clipTimelineStart = 0;
+    for (let k = 0; k < clipIndex; k++) {
+      clipTimelineStart += (clips[k].end - clips[k].start);
+    }
+    const curClip = clips[clipIndex];
+    const clipTimelineEnd = clipTimelineStart + (curClip.end - curClip.start);
+
+    // 다음 클립이 존재하는 경우
+    if (clipIndex < clips.length - 1) {
+      const nextClip = clips[clipIndex + 1];
+      const nextSrc = getClipSrc(nextClip);
+
+      // 1. 현재 클립 재생 중 대기 플레이어(Standby Video) 사전 대기 (Pre-seek)
+      if (standbyVideo) {
+        if (timelineT >= clipTimelineStart && timelineT < clipTimelineEnd - 0.15) {
+          if (standbyVideo.src !== nextSrc) {
+            standbyVideo.src = nextSrc;
+          }
+          if (Math.abs(standbyVideo.currentTime - nextClip.start) > 0.08) {
+            standbyVideo.currentTime = nextClip.start;
+          }
+        }
+      }
+
+      // 2. 현재 클립 종점(0.04초 전) 도달 시 0ms 듀얼 스왑 핫재생
+      if (timelineT >= clipTimelineEnd - 0.04) {
+        isJumpingRef.current = true;
+        currentClipIndexRef.current = clipIndex + 1;
+
+        if (standbyVideo) {
+          if (standbyVideo.src !== nextSrc) {
+            standbyVideo.src = nextSrc;
+          }
+          standbyVideo.playbackRate = playbackSpeed;
+          standbyVideo.muted = isMuted || isEditMuted;
+          standbyVideo.volume = volume;
+          if (Math.abs(standbyVideo.currentTime - nextClip.start) > 0.08) {
+            standbyVideo.currentTime = nextClip.start;
+          }
+
+          standbyVideo.play().then(() => {
+            activeVideo.pause();
+            const nextActive = activePlayerRef.current === "A" ? "B" : "A";
+            activePlayerRef.current = nextActive;
+            setActivePlayer(nextActive);
+
+            setSmoothTime(clipTimelineEnd);
+            setCurrentTime(clipTimelineEnd);
+            smoothTimeRef.current = clipTimelineEnd;
+            isJumpingRef.current = false;
+          }).catch((err) => {
+            console.warn("Standby video play error, falling back to direct seek:", err);
+            activeVideo.src = nextSrc;
+            activeVideo.currentTime = nextClip.start;
+            isJumpingRef.current = false;
+          });
+        } else {
+          activeVideo.src = nextSrc;
+          activeVideo.currentTime = nextClip.start;
+          isJumpingRef.current = false;
+        }
+      }
+    }
+  };
+
   // requestAnimationFrame을 활용해 프로그레스바 이동을 60fps로 매끄럽게 처리
   useEffect(() => {
     let animationFrameId: number;
 
     const updateSmoothTime = () => {
-      if (videoRef.current && !videoRef.current.paused) {
-        setSmoothTime(videoRef.current.currentTime);
+      const active = getActiveVideo();
+      if (active && !active.paused) {
+        if (isEditMode && clips.length > 0) {
+          const idx = currentClipIndexRef.current;
+          if (idx >= 0 && idx < clips.length) {
+            const curClip = clips[idx];
+            let clipTimelineStart = 0;
+            for (let k = 0; k < idx; k++) {
+              clipTimelineStart += (clips[k].end - clips[k].start);
+            }
+            const curInternal = active.currentTime;
+            const currentTimelineT = clipTimelineStart + Math.max(0, curInternal - curClip.start);
+
+            setSmoothTime(currentTimelineT);
+            setCurrentTime(currentTimelineT);
+            smoothTimeRef.current = currentTimelineT;
+
+            checkClipBoundsAndJump(currentTimelineT);
+          }
+        } else {
+          const cur = active.currentTime;
+          setSmoothTime(cur);
+          setCurrentTime(cur);
+        }
         animationFrameId = requestAnimationFrame(updateSmoothTime);
       }
     };
@@ -406,32 +778,31 @@ function App() {
     if (isPlaying) {
       animationFrameId = requestAnimationFrame(updateSmoothTime);
     } else {
-      if (videoRef.current) {
-        setSmoothTime(videoRef.current.currentTime);
+      const active = getActiveVideo();
+      if (active) {
+        if (isEditMode && clips.length > 0) {
+          // 일시 정지 상태 유지
+        } else {
+          setSmoothTime(active.currentTime);
+          setCurrentTime(active.currentTime);
+        }
       }
     }
 
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [isPlaying, currentTime]);
+  }, [isPlaying, currentTime, clips, isEditMode, activePlayer]);
 
-  // 비디오 시간 및 기간 업데이트
+  // 재생 시간 변경 시 호출
   const handleTimeUpdate = () => {
-    if (videoRef.current) {
-      const curTime = videoRef.current.currentTime;
-      setCurrentTime(curTime);
+    const active = getActiveVideo();
+    if (active && !isEditMode) {
+      const cur = active.currentTime;
+      setCurrentTime(cur);
+      setSmoothTime(cur);
 
-      // 편집 모드 시 잘라낸 종료 시점(trimEnd)에 도달하면 즉시 정지
-      if (isEditMode && trimEnd > 0 && curTime >= trimEnd) {
-        videoRef.current.pause();
-        videoRef.current.currentTime = trimEnd;
-        setCurrentTime(trimEnd);
-        setIsPlaying(false);
-      }
-
-      // 재생 중에도 duration이 0이거나 실제 값과 다르면 실시간 동기화
-      const videoDuration = videoRef.current.duration;
+      const videoDuration = active.duration;
       if (videoDuration) {
         setDuration((prev) => (prev !== videoDuration ? videoDuration : prev));
       }
@@ -439,44 +810,38 @@ function App() {
   };
 
   const handleLoadedMetadata = () => {
-    if (videoRef.current) {
-      videoRef.current.playbackRate = playbackSpeed;
-      const dur = videoRef.current.duration;
-      setDuration(dur);
-      setTrimStart(0);
-      setTrimEnd(dur);
+    const active = getActiveVideo();
+    if (active) {
+      active.volume = volume;
+      active.muted = isMuted || isEditMuted;
+      active.playbackRate = playbackSpeed;
+      if (active.duration) {
+        const dur = active.duration;
+        setDuration(dur);
+        if (clipsRef.current.length === 0) {
+          setTrimStart(0);
+          setTrimEnd(dur);
+          const initClips: ClipSegment[] = [{ id: "clip-1", filePath: filePath || "", start: 0, end: dur, title: fileName || undefined }];
+          setClips(initClips);
+          setSelectedClipId("clip-1");
+          historyRef.current = [initClips];
+          historyIndexRef.current = 0;
+        }
 
-      // 백그라운드 스레드에서 스프라이트 시트 비동기 생성 호출
-      if (filePath && dur > 0 && !isImage) {
-        setSpriteData(null);
-        invoke<SpriteSheetInfo>("generate_sprite_sheet", {
-          inputPath: filePath,
-          duration: dur,
-        })
-          .then((res) => {
-            setSpriteData({
-              ...res,
-              sprite_url: convertFileSrc(res.sprite_path),
-            });
-          })
-          .catch((err) => {
-            console.warn("Sprite sheet generation skipped or failed:", err);
+        if (isPlaying) {
+          active.play().catch((err) => {
+            console.warn("Autoplay in handleLoadedMetadata was blocked or failed:", err);
+            setIsPlaying(false);
           });
-      }
-
-      // 자동 재생이 설정되어 있다면 메타데이터가 로딩되자마자 재생 실행
-      if (isPlaying) {
-        videoRef.current.play().catch((err) => {
-          console.warn("Autoplay in handleLoadedMetadata was blocked or failed:", err);
-          setIsPlaying(false);
-        });
+        }
       }
     }
   };
 
   const handleDurationChange = () => {
-    if (videoRef.current && videoRef.current.duration) {
-      const dur = videoRef.current.duration;
+    const active = getActiveVideo();
+    if (active && active.duration) {
+      const dur = active.duration;
       setDuration(dur);
       setTrimStart(0);
       setTrimEnd(dur);
@@ -489,47 +854,72 @@ function App() {
 
   // 재생 / 일시정지 토글
   const togglePlayPause = () => {
-    if (!videoRef.current) return;
+    if (wasVideoLongPressRef.current) {
+      wasVideoLongPressRef.current = false;
+      return;
+    }
+    const active = getActiveVideo();
+    if (!active) return;
+
     if (isPlaying) {
-      videoRef.current.pause();
+      active.pause();
+      const standby = getStandbyVideo();
+      if (standby && !standby.paused) standby.pause();
       setIsPlaying(false);
     } else {
-      // 편집 모드에서 현재 시점이 trimEnd 오차범위 안이거나 trimStart 이전이면 trimStart 시점으로 자동 되감기 후 재생
-      if (isEditMode && trimEnd > 0) {
-        if (videoRef.current.currentTime >= trimEnd - 0.05 || videoRef.current.currentTime < trimStart) {
-          videoRef.current.currentTime = trimStart;
-          setCurrentTime(trimStart);
-        }
-      }
-      videoRef.current.play().then(() => {
+      active.play().then(() => {
         setIsPlaying(true);
       }).catch(err => console.error("Error playing video:", err));
     }
   };
 
-  // 재생 시점 이동
-  const handleSeek = (time: number) => {
-    if (!videoRef.current) return;
-    videoRef.current.currentTime = time;
-    setCurrentTime(time);
+  // 재생 시점 이동 (편집 모드 시 timelineT 파라미터 수신)
+  const handleSeek = (timelineT: number) => {
+    const active = getActiveVideo();
+    if (!active) return;
+
+    if (isEditMode && clips.length > 0) {
+      const activeInfo = getClipAtTimelineTime(timelineT, clips);
+      if (activeInfo) {
+        currentClipIndexRef.current = activeInfo.clipIndex;
+        const targetSrc = getClipSrc(activeInfo.clip);
+        if (active.src !== targetSrc) {
+          active.src = targetSrc;
+        }
+        active.currentTime = activeInfo.internalTime;
+      }
+      setSmoothTime(timelineT);
+      setCurrentTime(timelineT);
+      smoothTimeRef.current = timelineT;
+    } else {
+      active.currentTime = timelineT;
+      setCurrentTime(timelineT);
+      setSmoothTime(timelineT);
+      smoothTimeRef.current = timelineT;
+    }
   };
 
   // 음량 조절
   const handleVolumeChange = (vol: number) => {
-    if (!videoRef.current) return;
-    videoRef.current.volume = vol;
+    const vA = videoRefA.current;
+    const vB = videoRefB.current;
+    if (vA) vA.volume = vol;
+    if (vB) vB.volume = vol;
     setVolume(vol);
     if (vol > 0 && isMuted) {
-      videoRef.current.muted = false;
+      if (vA) vA.muted = false;
+      if (vB) vB.muted = false;
       setIsMuted(false);
     }
   };
 
   // 음소거 토글
   const toggleMute = () => {
-    if (!videoRef.current) return;
+    const vA = videoRefA.current;
+    const vB = videoRefB.current;
     const nextMuted = !isMuted;
-    videoRef.current.muted = nextMuted;
+    if (vA) vA.muted = nextMuted;
+    if (vB) vB.muted = nextMuted;
     setIsMuted(nextMuted);
   };
 
@@ -553,15 +943,19 @@ function App() {
         filters: [
           {
             name: "All Media Files",
-            extensions: ["mp4", "webm", "mkv", "avi", "mov", "ogv", "3gp", "png", "jpg", "jpeg", "webp", "gif", "bmp"],
+            extensions: ["mp4", "webm", "mkv", "avi", "mov", "ogv", "3gp", "png", "jpg", "jpeg", "webp", "gif", "bmp", "mp3", "m4a", "wav", "flac", "aac", "ogg", "opus", "wma"],
           },
           {
             name: "Video",
             extensions: ["mp4", "webm", "mkv", "avi", "mov", "ogv", "3gp"],
           },
           {
-            name: "Image",
+            name: "Image / GIF",
             extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"],
+          },
+          {
+            name: "Audio",
+            extensions: ["mp3", "m4a", "wav", "flac", "aac", "ogg", "opus", "wma"],
           }
         ],
       });
@@ -599,11 +993,14 @@ function App() {
         const isSelectedImage = /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(selected);
         if (!isSelectedImage) {
           setTimeout(() => {
-            if (videoRef.current) {
-              videoRef.current.load();
-              videoRef.current.play().then(() => {
+            const active = getActiveVideo();
+            if (active) {
+              active.volume = volume;
+              active.muted = isMuted || isEditMuted;
+              active.load();
+              active.play().then(() => {
                 setIsPlaying(true);
-              }).catch(e => console.error("Auto-play blocked or failed:", e));
+              }).catch((e: unknown) => console.error("Auto-play blocked or failed:", e));
             }
           }, 50);
         }
@@ -643,11 +1040,14 @@ function App() {
     const isTargetImage = /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(targetPath);
     if (!isTargetImage) {
       setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.load();
-          videoRef.current.play().then(() => {
+        const active = getActiveVideo();
+        if (active) {
+          active.volume = volume;
+          active.muted = isMuted || isEditMuted;
+          active.load();
+          active.play().then(() => {
             setIsPlaying(true);
-          }).catch(e => console.warn("Auto-play failed:", e));
+          }).catch((e: unknown) => console.warn("Auto-play failed:", e));
         }
       }, 50);
     }
@@ -737,15 +1137,36 @@ function App() {
       switch (e.code) {
         case "Space":
           e.preventDefault();
-          togglePlayPause();
+          if (e.repeat) return;
+          isSpaceLongPressRef.current = false;
+          if (spaceTimeoutRef.current) window.clearTimeout(spaceTimeoutRef.current);
+          spaceTimeoutRef.current = window.setTimeout(() => {
+            isSpaceLongPressRef.current = true;
+            if (!isPlayingRef.current) {
+              togglePlayPause();
+            }
+            activate2xRef.current();
+          }, 300);
           break;
         case "ArrowLeft":
           e.preventDefault();
-          handleSeek(Math.max(0, currentTime - 5));
+          if (e.shiftKey) {
+            handleSeek(Math.max(0, currentTime - (1 / 30)));
+          } else if (e.ctrlKey || e.metaKey) {
+            handleSeek(Math.max(0, currentTime - 1));
+          } else {
+            handleSeek(Math.max(0, currentTime - 5));
+          }
           break;
         case "ArrowRight":
           e.preventDefault();
-          handleSeek(Math.min(duration, currentTime + 5));
+          if (e.shiftKey) {
+            handleSeek(Math.min(duration, currentTime + (1 / 30)));
+          } else if (e.ctrlKey || e.metaKey) {
+            handleSeek(Math.min(duration, currentTime + 1));
+          } else {
+            handleSeek(Math.min(duration, currentTime + 5));
+          }
           break;
         case "ArrowUp":
           e.preventDefault();
@@ -763,6 +1184,33 @@ function App() {
           e.preventDefault();
           toggleMute();
           break;
+        case "KeyC":
+          e.preventDefault();
+          handleSplitClip();
+          break;
+        case "KeyZ":
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            if (e.shiftKey) {
+              handleRedo();
+            } else {
+              handleUndo();
+            }
+          }
+          break;
+        case "KeyY":
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            handleRedo();
+          }
+          break;
+        case "Backspace":
+        case "Delete":
+          if (isEditMode && selectedClipId && clips.length > 1) {
+            e.preventDefault();
+            handleDeleteClip();
+          }
+          break;
         case "Escape":
           if (isFullscreen) {
             e.preventDefault();
@@ -774,28 +1222,109 @@ function App() {
       }
     };
 
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        const activeEl = document.activeElement as HTMLElement;
+        if (
+          activeEl?.tagName === "TEXTAREA" ||
+          (activeEl?.tagName === "INPUT" && (activeEl as HTMLInputElement).type !== "range")
+        ) {
+          return;
+        }
+        if (!videoSrc) return;
+
+        e.preventDefault();
+        if (spaceTimeoutRef.current) {
+          window.clearTimeout(spaceTimeoutRef.current);
+          spaceTimeoutRef.current = null;
+        }
+
+        if (isSpaceLongPressRef.current) {
+          isSpaceLongPressRef.current = false;
+          deactivate2xRef.current();
+        } else {
+          togglePlayPause();
+        }
+      }
+    };
+
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [videoSrc, isPlaying, currentTime, duration, volume, isMuted, isFullscreen]);
+  }, [videoSrc, isPlaying, currentTime, duration, volume, isMuted, isFullscreen, isEditMode, selectedClipId, clips]);
 
-  // 비디오 구간 조절 핸들러
-  const handleTrimChange = (start: number, end: number) => {
-    setTrimStart(start);
-    setTrimEnd(end);
-    if (videoRef.current) {
-      if (videoRef.current.currentTime < start || videoRef.current.currentTime > end) {
-        videoRef.current.currentTime = start;
-        setCurrentTime(start);
-      }
+  // 클립 상태 동기식 히스토리 저장 (Undo/Redo 지원)
+  const pushHistory = (newClips: ClipSegment[]) => {
+    const nextHistory = historyRef.current.slice(0, historyIndexRef.current + 1);
+    nextHistory.push(newClips);
+    historyRef.current = nextHistory;
+    historyIndexRef.current = nextHistory.length - 1;
+    setClips(newClips);
+  };
+
+  // 실행 취소 (Ctrl + Z)
+  const handleUndo = () => {
+    if (historyIndexRef.current > 0) {
+      historyIndexRef.current -= 1;
+      const prevClips = historyRef.current[historyIndexRef.current];
+      setClips(prevClips);
+      setSelectedClipId(prevClips[0]?.id || null);
     }
+  };
+
+  // 다시 실행 (Ctrl + Y / Ctrl + Shift + Z)
+  const handleRedo = () => {
+    if (historyIndexRef.current < historyRef.current.length - 1) {
+      historyIndexRef.current += 1;
+      const nextClips = historyRef.current[historyIndexRef.current];
+      setClips(nextClips);
+      setSelectedClipId(nextClips[0]?.id || null);
+    }
+  };
+
+  // 'C' 키로 현재 시간 위치에서 클립 분할 (Razor Cut)
+  const handleSplitClip = () => {
+    if (!isEditMode || duration === 0 || !videoSrc || clips.length === 0) return;
+    const cur = currentTime;
+
+    const activeInfo = getClipAtTimelineTime(cur, clips);
+    if (!activeInfo) return;
+
+    const { clipIndex, clip, internalTime } = activeInfo;
+    // 최소 길이 가드 (분할할 클립의 남은 앞뒤 길이가 최소 0.15초 이상이어야 함)
+    if (internalTime - clip.start < 0.15 || clip.end - internalTime < 0.15) {
+      return;
+    }
+
+    const clipA: ClipSegment = { id: `clip-${Date.now()}-1`, filePath: clip.filePath, start: clip.start, end: internalTime, title: clip.title };
+    const clipB: ClipSegment = { id: `clip-${Date.now()}-2`, filePath: clip.filePath, start: internalTime, end: clip.end, title: clip.title };
+
+    const nextClips = [...clips];
+    nextClips.splice(clipIndex, 1, clipA, clipB);
+    pushHistory(nextClips);
+    setSelectedClipId(clipB.id);
+  };
+
+  // 'Backspace' / 'Delete' 키로 선택한 클립 리플 삭제 (Ripple Cut)
+  const handleDeleteClip = (targetIdParam?: string) => {
+    if (!isEditMode || clips.length <= 1) return;
+    const targetId = targetIdParam || selectedClipId;
+    if (!targetId) return;
+
+    const nextClips = clips.filter((c) => c.id !== targetId);
+    if (nextClips.length === 0) return;
+
+    pushHistory(nextClips);
+    setSelectedClipId(nextClips[0].id);
   };
 
   // 현재 프레임을 이미지 파일로 캡처하여 저장 (바이너리 Vec<u8> 전달)
   const handleCaptureFrame = async () => {
-    if (!videoRef.current || !videoSrc) return;
-    const video = videoRef.current;
+    const video = getActiveVideo();
+    if (!video || !videoSrc) return;
 
     const defaultName = `capture_${Math.floor(Date.now() / 1000)}.png`;
     try {
@@ -848,43 +1377,76 @@ function App() {
     }
   };
 
-  // 비디오 편집 완료 후 인코딩/추출 프로세스 진행
-  const handleExport = async (fps: string, useCopy: boolean, crf: number, exportSpeed: number = 1.0) => {
+  // 비디오/움짤/오디오 편집 완료 후 인코딩/추출 프로세스 진행
+  const handleExport = async (options: ExportOptions) => {
     if (!filePath || duration === 0) return;
 
-    // 기본 파일 이름 제안 (예: video_edited.mp4)
+    const {
+      exportType,
+      fps,
+      useCopy,
+      crf,
+      exportSpeed,
+      gifFps,
+      gifQuality,
+      gifFormat,
+      audioBitrate,
+      audioFormat
+    } = options;
+
     const dotIndex = fileName ? fileName.lastIndexOf(".") : -1;
-    const baseName = dotIndex !== -1 ? fileName!.substring(0, dotIndex) : "edited_video";
-    const ext = dotIndex !== -1 ? fileName!.substring(dotIndex + 1) : "mp4";
-    const defaultSaveName = `${baseName}_edited.${ext}`;
+    const baseName = dotIndex !== -1 ? fileName!.substring(0, dotIndex) : "edited_media";
+
+    let defaultExt = "mp4";
+    let filterName = "Video";
+    let filterExtensions = ["mp4", "webm", "mkv", "mov"];
+
+    if (exportType === "gif") {
+      defaultExt = gifFormat;
+      filterName = gifFormat === "gif" ? "Animated GIF" : "Animated WebP";
+      filterExtensions = [gifFormat];
+    } else if (exportType === "audio") {
+      defaultExt = audioFormat;
+      filterName = "Audio";
+      filterExtensions = [audioFormat];
+    } else {
+      const srcExt = dotIndex !== -1 ? fileName!.substring(dotIndex + 1).toLowerCase() : "mp4";
+      if (["mp4", "webm", "mkv", "mov", "avi"].includes(srcExt)) {
+        defaultExt = srcExt;
+      }
+    }
+
+    const defaultSaveName = `${baseName}_edited.${defaultExt}`;
 
     try {
-      // Tauri 저장 다이얼로그 호출 (추출 위치 및 확장자 지정 가능)
       const savePath = await save({
-        title: "편집 비디오 저장 경로 선택",
+        title:
+          exportType === "gif"
+            ? "움짤 저장 경로 선택"
+            : exportType === "audio"
+            ? "오디오 저장 경로 선택"
+            : "편집 비디오 저장 경로 선택",
         defaultPath: defaultSaveName,
         filters: [
           {
-            name: "Video",
-            extensions: ["mp4", "webm", "mkv", "mov"],
+            name: filterName,
+            extensions: filterExtensions,
           },
         ],
       });
 
-      if (!savePath) return; // 사용자 취소 시 취소 처리
+      if (!savePath) return;
 
-      // 인코딩 시작 즉시 모달 닫기
       setIsExportModalOpen(false);
       setIsExporting(true);
 
-      // 백엔드 인코딩 호출 (용량 압축 수준, 배속 및 복제 여부 전달)
       let cropX: number | null = null;
       let cropY: number | null = null;
       let cropW: number | null = null;
       let cropH: number | null = null;
 
-      if (isCropMode && videoRef.current) {
-        const video = videoRef.current;
+      const video = getActiveVideo();
+      if (isCropMode && video) {
         cropX = Math.round(cropArea.x * video.videoWidth);
         cropY = Math.round(cropArea.y * video.videoHeight);
         cropW = Math.round(cropArea.w * video.videoWidth);
@@ -905,19 +1467,37 @@ function App() {
         cropH,
         exportSpeed,
         isMuted: isEditMuted,
+        exportType,
+        gifFps,
+        gifQuality,
+        gifFormat,
+        audioBitrate,
+        audioFormat,
+        segments: clips.map((c) => ({
+          id: c.id,
+          filePath: c.filePath || filePath || "",
+          file_path: c.filePath || filePath || "",
+          start: c.start,
+          end: c.end,
+        })),
       });
 
-      // 인앱 커스텀 토스트 알림 작동
+      const successMessage =
+        exportType === "gif"
+          ? "움짤 추출 및 저장이 성공적으로 완료되었습니다!"
+          : exportType === "audio"
+          ? "오디오 추출 및 저장이 성공적으로 완료되었습니다!"
+          : "비디오 추출 및 저장이 성공적으로 완료되었습니다!";
+
       setToastMessage({
-        text: "비디오 추출 및 저장이 성공적으로 완료되었습니다!",
+        text: successMessage,
         type: "success"
       });
       setTimeout(() => setToastMessage(null), 3000);
     } catch (err) {
-      console.error("Video export failed:", err);
-      // 인앱 커스텀 에러 토스트 알림 작동
+      console.error("Export failed:", err);
       setToastMessage({
-        text: `비디오 추출에 실패했습니다: ${err}`,
+        text: `추출에 실패했습니다: ${err}`,
         type: "error"
       });
       setTimeout(() => setToastMessage(null), 4000);
@@ -926,16 +1506,22 @@ function App() {
     }
   };
 
-  // 편집 모드 토글 (모드 전환 시 배속, 구간, 크롭, 음소거 등 편집 내역 전면 초기화)
+  // 편집 모드 토글 (모드 전환 시 배속, 구간, 클립, 크롭, 음소거 등 편집 내역 전면 초기화)
   const handleToggleEdit = () => {
     // 배속 및 음소거 초기화
     setPlaybackSpeed(1.0);
     setIsEditMuted(false);
-    if (videoRef.current) {
-      videoRef.current.playbackRate = 1.0;
-      videoRef.current.muted = isMuted;
+    const active = getActiveVideo();
+    if (active) {
+      active.playbackRate = 1.0;
+      active.muted = isMuted;
     }
-    // 자르기 구간 및 크롭 영역 초기화
+    // 클립 상태 및 히스토리 초기화
+    const initClips: ClipSegment[] = [{ id: "clip-1", filePath: filePath || "", start: 0, end: duration, title: fileName || undefined }];
+    setClips(initClips);
+    setSelectedClipId("clip-1");
+    historyRef.current = [initClips];
+    historyIndexRef.current = 0;
     setTrimStart(0);
     setTrimEnd(duration);
     setIsCropMode(false);
@@ -945,8 +1531,9 @@ function App() {
     setIsEditMode((prev) => {
       const next = !prev;
       if (next) {
-        if (isPlaying && videoRef.current) {
-          videoRef.current.pause();
+        const currentActive = getActiveVideo();
+        if (isPlaying && currentActive) {
+          currentActive.pause();
           setIsPlaying(false);
         }
         // 이미지일 경우 크롭 모드(크롭 오버레이)를 자동으로 즉시 활성화
@@ -959,11 +1546,95 @@ function App() {
     });
   };
 
+  const handleVideoMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0 || isImage) return;
+    if (!isPlayingRef.current) return;
+
+    isVideoLongPressRef.current = false;
+    if (videoPressTimeoutRef.current) window.clearTimeout(videoPressTimeoutRef.current);
+    videoPressTimeoutRef.current = window.setTimeout(() => {
+      isVideoLongPressRef.current = true;
+      activate2xSpeed();
+    }, 300);
+  };
+
+  const handleVideoMouseUp = (e: React.MouseEvent) => {
+    if (e.button !== 0 || isImage) return;
+    if (videoPressTimeoutRef.current) {
+      window.clearTimeout(videoPressTimeoutRef.current);
+      videoPressTimeoutRef.current = null;
+    }
+
+    if (isVideoLongPressRef.current) {
+      isVideoLongPressRef.current = false;
+      wasVideoLongPressRef.current = true;
+      deactivate2xSpeed();
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  };
+
+  const handleVideoMouseLeave = () => {
+    if (videoPressTimeoutRef.current) {
+      window.clearTimeout(videoPressTimeoutRef.current);
+      videoPressTimeoutRef.current = null;
+    }
+    if (isVideoLongPressRef.current) {
+      isVideoLongPressRef.current = false;
+      deactivate2xSpeed();
+    }
+  };
+
+  const handleVideoTouchStart = () => {
+    if (isImage) return;
+    if (!isPlayingRef.current) return;
+
+    isVideoLongPressRef.current = false;
+    if (videoPressTimeoutRef.current) window.clearTimeout(videoPressTimeoutRef.current);
+    videoPressTimeoutRef.current = window.setTimeout(() => {
+      isVideoLongPressRef.current = true;
+      activate2xSpeed();
+    }, 300);
+  };
+
+  const handleVideoTouchEnd = (e: React.TouchEvent) => {
+    if (isImage) return;
+    if (videoPressTimeoutRef.current) {
+      window.clearTimeout(videoPressTimeoutRef.current);
+      videoPressTimeoutRef.current = null;
+    }
+    if (isVideoLongPressRef.current) {
+      isVideoLongPressRef.current = false;
+      wasVideoLongPressRef.current = true;
+      deactivate2xSpeed();
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  };
+
+  const handleVideoTouchCancel = () => {
+    if (isImage) return;
+    if (videoPressTimeoutRef.current) {
+      window.clearTimeout(videoPressTimeoutRef.current);
+      videoPressTimeoutRef.current = null;
+    }
+    if (isVideoLongPressRef.current) {
+      isVideoLongPressRef.current = false;
+      deactivate2xSpeed();
+    }
+  };
+
   // 컴포넌트 언마운트 시 타이머 정리
   useEffect(() => {
     return () => {
       if (controlsTimeoutRef.current) {
         window.clearTimeout(controlsTimeoutRef.current);
+      }
+      if (spaceTimeoutRef.current) {
+        window.clearTimeout(spaceTimeoutRef.current);
+      }
+      if (videoPressTimeoutRef.current) {
+        window.clearTimeout(videoPressTimeoutRef.current);
       }
     };
   }, []);
@@ -972,6 +1643,10 @@ function App() {
     <div
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setContextMenu({ isOpen: true, x: e.clientX, y: e.clientY });
+      }}
       className="relative flex flex-col w-screen h-screen overflow-hidden text-white bg-neutral-950/70 backdrop-blur-3xl select-none"
     >
       {/* 윈도우 투명 효과 배경 (블러 및 디테일 제어) */}
@@ -1002,6 +1677,16 @@ function App() {
       }`}>
         {videoSrc ? (
           <div className="relative w-full h-full flex items-center justify-center bg-black/10">
+            {/* 움짤 배지 */}
+            <AnimatedGifBadge isAnimatedGif={isAnimatedGif} filePath={filePath} />
+
+            {/* 오디오 비주얼라이저 오버레이 */}
+            <AudioVisualizer
+              isAudio={isAudio}
+              isPlaying={isPlaying}
+              filePath={filePath}
+              fileName={fileName || ""}
+            />
             {/* 미디어 렌더러 (비디오 vs 이미지 분기) */}
             {isImage ? (
               <img
@@ -1013,16 +1698,50 @@ function App() {
                 className="w-full h-full object-contain pointer-events-none"
               />
             ) : (
-              <video
-                ref={videoRef}
-                src={videoSrc}
-                onTimeUpdate={handleTimeUpdate}
-                onLoadedMetadata={handleLoadedMetadata}
-                onDurationChange={handleDurationChange}
-                onEnded={handleVideoEnded}
-                onClick={togglePlayPause}
-                className="w-full h-full object-contain cursor-pointer"
-              />
+              <div
+                className="relative w-full h-full flex items-center justify-center cursor-default"
+                onMouseDown={handleVideoMouseDown}
+                onMouseUp={handleVideoMouseUp}
+                onMouseLeave={handleVideoMouseLeave}
+                onTouchStart={handleVideoTouchStart}
+                onTouchEnd={handleVideoTouchEnd}
+                onTouchCancel={handleVideoTouchCancel}
+              >
+                <video
+                  ref={videoRefA}
+                  src={videoSrc}
+                  onTimeUpdate={handleTimeUpdate}
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onDurationChange={handleDurationChange}
+                  onEnded={handleVideoEnded}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => {
+                    if (!isJumpingRef.current && activePlayer === "A") {
+                      setIsPlaying(false);
+                    }
+                  }}
+                  className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
+                    activePlayer === "A" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
+                  }`}
+                />
+                <video
+                  ref={videoRefB}
+                  src={videoSrc}
+                  onTimeUpdate={handleTimeUpdate}
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onDurationChange={handleDurationChange}
+                  onEnded={handleVideoEnded}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => {
+                    if (!isJumpingRef.current && activePlayer === "B") {
+                      setIsPlaying(false);
+                    }
+                  }}
+                  className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
+                    activePlayer === "B" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
+                  }`}
+                />
+              </div>
             )}
 
             {/* 왼쪽 이동 화살표 (Hover Chevron) */}
@@ -1090,13 +1809,25 @@ function App() {
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
         originalFileSize={originalFileSize}
-        trimDuration={trimEnd - trimStart}
+        trimDuration={
+          isEditMode && clips.length > 0
+            ? clips.reduce((acc, c) => acc + (c.end - c.start), 0)
+            : trimEnd - trimStart
+        }
         videoDuration={duration}
         onExport={handleExport}
         isExporting={isExporting}
         isCropMode={isCropMode}
         cropAreaRatio={isCropMode ? cropArea.w * cropArea.h : 1.0}
         initialExportSpeed={playbackSpeed}
+        videoSrc={videoSrc}
+        filePath={filePath}
+        trimStart={trimStart}
+        trimEnd={trimEnd}
+        initialTab={isAnimatedGif ? "gif" : isAudio ? "audio" : "video"}
+        isAudioOnly={isAudio}
+        cropArea={cropArea}
+        clips={clips}
       />
 
       {/* 플로팅 컨트롤 바 */}
@@ -1113,13 +1844,13 @@ function App() {
         isFullscreen={isFullscreen}
         onToggleFullscreen={toggleFullscreen}
         onOpenFile={openFile}
-        isVisible={isControlsVisible}
+        isVisible={isControlsVisible && !is2xActive}
         hasVideo={!!videoSrc}
         isEditMode={isEditMode}
         onToggleEdit={handleToggleEdit}
         trimStart={trimStart}
         trimEnd={trimEnd}
-        onTrimChange={handleTrimChange}
+        onTrimChange={() => {}}
         onSaveClick={handleSaveClick}
         isCropMode={isCropMode}
         onToggleCrop={() => {
@@ -1134,7 +1865,11 @@ function App() {
         videoSrc={videoSrc}
         isEditMuted={isEditMuted}
         onToggleEditMute={handleToggleEditMute}
-        spriteData={spriteData}
+        clips={clips}
+        selectedClipId={selectedClipId}
+        onSelectClip={(id) => setSelectedClipId(id)}
+        dropInsertIndex={dropInsertIndex}
+        isDraggingAsset={isDragOver}
       />
 
       {/* 추출 진행 중 모달 오버레이 */}
@@ -1204,6 +1939,25 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* 커스텀 우클릭 컨텍스트 메뉴 */}
+      <ContextMenu
+        x={contextMenu.x}
+        y={contextMenu.y}
+        isOpen={contextMenu.isOpen}
+        onClose={() => setContextMenu((prev) => ({ ...prev, isOpen: false }))}
+        playbackSpeed={playbackSpeed}
+        onCaptureFrame={handleCaptureFrame}
+        onPlaybackSpeedChange={handlePlaybackSpeedChange}
+        onOpenInfoModal={handleOpenInfoModal}
+      />
+
+      {/* 단축키 목록 및 제작자(Yusi0) / 깃허브 정보 모달 */}
+      <InfoModal
+        isOpen={isInfoModalOpen}
+        onClose={() => setIsInfoModalOpen(false)}
+        initialTab={infoModalTab}
+      />
     </div>
   );
 }

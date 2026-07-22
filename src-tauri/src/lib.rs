@@ -85,12 +85,20 @@ fn get_ffmpeg_sidecar_path(app_handle: &tauri::AppHandle) -> Option<String> {
 fn get_ffmpeg_path(app_handle: &tauri::AppHandle) -> String {
     if let Some(sidecar_path) = get_ffmpeg_sidecar_path(app_handle) {
         sidecar_path
-    } else if Command::new("ffmpeg").arg("-version").output().is_ok() {
-        "ffmpeg".to_string()
-    } else if let Some(path) = find_winget_ffmpeg() {
-        path
     } else {
-        "ffmpeg".to_string() // 최후의 수단
+        // 글로벌 ffmpeg가 정상적으로 설치되었는지 체크할 때도 창 숨김 플래그 적용
+        let mut cmd = Command::new("ffmpeg");
+        cmd.arg("-version");
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(0x08000000);
+
+        if cmd.output().is_ok() {
+            "ffmpeg".to_string()
+        } else if let Some(path) = find_winget_ffmpeg() {
+            path
+        } else {
+            "ffmpeg".to_string() // 최후의 수단
+        }
     }
 }
 
@@ -119,7 +127,130 @@ fn build_atempo_filter(speed: f64) -> String {
     filters.join(",")
 }
 
-// 비디오를 자르고 인코딩하여 저장하는 커맨드 (용량 압축 CRF 설정, 크롭 좌표, 배속 및 copy 최적화 포함)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipSegment {
+    pub id: String,
+    #[serde(alias = "filePath")]
+    pub file_path: String,
+    pub start: f64,
+    pub end: f64,
+}
+
+// ffprobe 경로 탐색 헬퍼
+fn get_ffprobe_path(app_handle: &tauri::AppHandle) -> String {
+    let ffmpeg = get_ffmpeg_path(app_handle);
+    if ffmpeg.contains("ffmpeg") {
+        let ffprobe_str = ffmpeg.replace("ffmpeg", "ffprobe");
+        if Path::new(&ffprobe_str).exists() {
+            return ffprobe_str;
+        } else {
+            // 경로 치환 후 정상 작동 여부 체크 시에도 창 숨김 플래그 적용
+            let mut cmd = Command::new(&ffprobe_str);
+            cmd.arg("-version");
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(0x08000000);
+
+            if cmd.output().is_ok() {
+                return ffprobe_str;
+            }
+        }
+    }
+    
+    // 글로벌 ffprobe 존재 여부 체크 시에도 창 숨김 플래그 적용
+    let mut cmd = Command::new("ffprobe");
+    cmd.arg("-version");
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000);
+
+    if cmd.output().is_ok() {
+        return "ffprobe".to_string();
+    }
+    
+    "ffprobe".to_string()
+}
+
+// 미디어 파일 오디오 스트림 보유 여부 탐색 헬퍼
+fn has_audio_stream(app_handle: &tauri::AppHandle, path: &str) -> bool {
+    let ffprobe = get_ffprobe_path(app_handle);
+    let mut cmd = Command::new(&ffprobe);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000);
+
+    cmd.arg("-v")
+        .arg("error")
+        .arg("-select_streams")
+        .arg("a")
+        .arg("-show_entries")
+        .arg("stream=codec_type")
+        .arg("-of")
+        .arg("default=noprint_wrappers=1:nokey=1")
+        .arg(path);
+
+    if let Ok(output) = cmd.output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return stdout.trim().contains("audio");
+    }
+    false
+}
+
+// 비디오 파일 가로/세로 해상도 탐색 헬퍼
+fn get_video_resolution(app_handle: &tauri::AppHandle, path: &str) -> (u32, u32) {
+    let ffprobe = get_ffprobe_path(app_handle);
+    let mut cmd = Command::new(&ffprobe);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000);
+
+    cmd.arg("-v")
+        .arg("error")
+        .arg("-select_streams")
+        .arg("v:0")
+        .arg("-show_entries")
+        .arg("stream=width,height")
+        .arg("-of")
+        .arg("csv=s=x:p=0")
+        .arg(path);
+
+    if let Ok(output) = cmd.output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parts: Vec<&str> = stdout.trim().split('x').collect();
+        if parts.len() == 2 {
+            let w = parts[0].parse::<u32>().unwrap_or(1920);
+            let h = parts[1].parse::<u32>().unwrap_or(1080);
+            return (w, h);
+        }
+    }
+    (1920, 1080)
+}
+
+// 오디오 스트림 코덱 명칭 탐색 헬퍼 (예: mp3, aac, pcm_s16le, opus, flac 등)
+fn get_audio_codec(app_handle: &tauri::AppHandle, path: &str) -> Option<String> {
+    let ffprobe = get_ffprobe_path(app_handle);
+    let mut cmd = Command::new(&ffprobe);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000);
+
+    cmd.arg("-v")
+        .arg("error")
+        .arg("-select_streams")
+        .arg("a:0")
+        .arg("-show_entries")
+        .arg("stream=codec_name")
+        .arg("-of")
+        .arg("default=noprint_wrappers=1:nokey=1")
+        .arg(path);
+
+    if let Ok(output) = cmd.output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let codec = stdout.trim().to_lowercase();
+        if !codec.is_empty() {
+            return Some(codec);
+        }
+    }
+    None
+}
+
+// 동영상 트림, 크롭, 배속 및 움짤(GIF/WebP)/오디오(MP3/M4A/WAV) 내보내기 커맨드
 #[tauri::command]
 async fn export_video(
     app_handle: tauri::AppHandle,
@@ -136,17 +267,31 @@ async fn export_video(
     crop_h: Option<u32>,
     export_speed: Option<f64>,
     is_muted: Option<bool>,
+    export_type: Option<String>,
+    gif_fps: Option<String>,
+    gif_quality: Option<u32>,
+    gif_format: Option<String>,
+    audio_bitrate: Option<String>,
+    audio_format: Option<String>,
+    segments: Option<Vec<ClipSegment>>,
 ) -> Result<String, String> {
     let ffmpeg = get_ffmpeg_path(&app_handle);
-    let start_str = format!("{:.3}", start_time);
-    let duration_str = format!("{:.3}", end_time - start_time);
-
     let speed = export_speed.unwrap_or(1.0);
     let is_speed_changed = (speed - 1.0).abs() > 0.01;
     let muted = is_muted.unwrap_or(false);
+    let exp_type = export_type.unwrap_or_else(|| "video".to_string());
 
-    // 배속 변경 또는 음소거 설정 시 스트림 복제 사용 불가 (재인코딩 필요)
-    let actual_use_copy = use_copy && !is_speed_changed && !muted;
+    let active_segments = match segments {
+        Some(ref segs) if !segs.is_empty() => segs.clone(),
+        _ => vec![ClipSegment {
+            id: "default".to_string(),
+            file_path: input_path.clone(),
+            start: start_time,
+            end: end_time,
+        }],
+    };
+
+    let is_multi_segment = active_segments.len() > 1;
 
     let mut cmd = Command::new(&ffmpeg);
     #[cfg(target_os = "windows")]
@@ -154,48 +299,349 @@ async fn export_video(
     
     cmd.arg("-y"); // 덮어쓰기 허용
 
-    cmd.arg("-ss").arg(&start_str);
-    cmd.arg("-t").arg(&duration_str);
-    cmd.arg("-i").arg(&input_path);
+    if exp_type == "gif" {
+        // [움짤(GIF/WebP) 내보내기]
+        let gif_f = gif_format.unwrap_or_else(|| "gif".to_string());
+        let fps_val = gif_fps.unwrap_or_else(|| "15".to_string());
+        let quality_val = gif_quality.unwrap_or(100);
+        let scale_ratio = (quality_val as f64) / 100.0;
 
-    if actual_use_copy {
-        // 원본 유지 + 초고속 무손실 스트림 복제
-        cmd.arg("-c").arg("copy");
-    } else {
-        // 비디오/오디오 재인코딩 수행 (압축, FPS 변경, 크롭, 배속 변경, 음소거)
-        if fps != "original" {
-            cmd.arg("-r").arg(&fps);
-        }
-        cmd.arg("-c:v").arg("libx264");
-        
-        // 음소거 선택 시 오디오 트랙 완전 제거 (-an), 아닐 경우 AAC 인코딩
-        if muted {
-            cmd.arg("-an");
+        // 짝수 픽셀 해상도 보장 스케일 필터 (trunc(iw*ratio/2)*2)
+        let scale_filter = format!("scale='trunc(iw*{:.4}/2)*2':'trunc(ih*{:.4}/2)*2'", scale_ratio, scale_ratio);
+
+        let crop_filter_str = if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
+            format!("crop={}:{}:{}:{},", w, h, x, y)
         } else {
-            cmd.arg("-c:a").arg("aac");
-            if is_speed_changed {
-                cmd.arg("-af").arg(build_atempo_filter(speed));
+            "".to_string()
+        };
+
+        let pts_filter_str = if is_speed_changed {
+            let pts_mult = 1.0 / speed;
+            format!("setpts={:.4}*PTS,", pts_mult)
+        } else {
+            "".to_string()
+        };
+
+        if !is_multi_segment {
+            let seg = &active_segments[0];
+            let src_path = if seg.file_path.is_empty() { &input_path } else { &seg.file_path };
+            let start_str = format!("{:.3}", seg.start);
+            let duration_str = format!("{:.3}", seg.end - seg.start);
+
+            cmd.arg("-i").arg(src_path);
+            cmd.arg("-ss").arg(&start_str);
+            cmd.arg("-t").arg(&duration_str);
+
+            if gif_f == "webp" {
+                cmd.arg("-vcodec").arg("libwebp");
+                cmd.arg("-loop").arg("0");
+                cmd.arg("-vf").arg(format!("{}{}fps={},{}", crop_filter_str, pts_filter_str, fps_val, scale_filter));
+            } else {
+                // GIF: 고품질 palettegen / paletteuse 적용
+                let fc = format!("[0:v]{}{}fps={},{},split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse", crop_filter_str, pts_filter_str, fps_val, scale_filter);
+                cmd.arg("-filter_complex").arg(fc);
+            }
+        } else {
+            // [다중 클립 타임라인 GIF/WebP 내보내기]
+            let (base_w, base_h) = get_video_resolution(&app_handle, &input_path);
+            let raw_w = crop_w.unwrap_or(base_w);
+            let raw_h = crop_h.unwrap_or(base_h);
+            let scaled_w = ((raw_w as f64) * scale_ratio) as u32;
+            let scaled_h = ((raw_h as f64) * scale_ratio) as u32;
+            let target_w = (scaled_w / 2) * 2;
+            let target_h = (scaled_h / 2) * 2;
+
+            let mut unique_inputs: Vec<String> = Vec::new();
+            for seg in &active_segments {
+                let path = if seg.file_path.is_empty() { input_path.clone() } else { seg.file_path.clone() };
+                if !unique_inputs.contains(&path) {
+                    unique_inputs.push(path);
+                }
+            }
+            for input in &unique_inputs {
+                cmd.arg("-i").arg(input);
+            }
+
+            let mut filter_str = String::new();
+            let mut labels = String::new();
+            for (idx, seg) in active_segments.iter().enumerate() {
+                let path = if seg.file_path.is_empty() { input_path.clone() } else { seg.file_path.clone() };
+                let input_idx = unique_inputs.iter().position(|r| r == &path).unwrap_or(0);
+                let duration = (seg.end - seg.start).max(0.1);
+                
+                filter_str.push_str(&format!(
+                    "[{}:v]trim=start={:.3}:duration={:.3},setpts=PTS-STARTPTS,{}scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2,setsar=1,{}null[v{}];",
+                    input_idx, seg.start, duration, crop_filter_str, target_w, target_h, target_w, target_h, pts_filter_str, idx
+                ));
+                labels.push_str(&format!("[v{}]", idx));
+            }
+            filter_str.push_str(&format!("{}concat=n={}:v=1:a=0[vconcat];", labels, active_segments.len()));
+            
+            if gif_f == "webp" {
+                filter_str.push_str(&format!("[vconcat]fps={}[vout]", fps_val));
+                cmd.arg("-filter_complex").arg(&filter_str);
+                cmd.arg("-map").arg("[vout]");
+                cmd.arg("-vcodec").arg("libwebp");
+                cmd.arg("-loop").arg("0");
+            } else {
+                filter_str.push_str(&format!("[vconcat]fps={}[vfps];[vfps]split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse[vout]", fps_val));
+                cmd.arg("-filter_complex").arg(&filter_str);
+                cmd.arg("-map").arg("[vout]");
             }
         }
-        
-        // 비디오 필터 (-vf)
-        let mut vf_filters = Vec::new();
-        if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
-            vf_filters.push(format!("crop={}:{}:{}:{}", w, h, x, y));
-        }
-        if is_speed_changed {
-            let pts_mult = 1.0 / speed;
-            vf_filters.push(format!("setpts={:.4}*PTS", pts_mult));
-        }
-        if !vf_filters.is_empty() {
-            cmd.arg("-vf").arg(vf_filters.join(","));
+    } else if exp_type == "audio" {
+        // [오디오 내보내기]
+        let target_fmt = audio_format.unwrap_or_else(|| "mp3".to_string());
+        let bitrate_setting = audio_bitrate.unwrap_or_else(|| "320k".to_string());
+
+        if !is_multi_segment {
+            let seg = &active_segments[0];
+            let src_path = if seg.file_path.is_empty() { &input_path } else { &seg.file_path };
+            let start_str = format!("{:.3}", seg.start);
+            let duration_str = format!("{:.3}", seg.end - seg.start);
+
+            cmd.arg("-i").arg(src_path);
+            cmd.arg("-ss").arg(&start_str);
+            cmd.arg("-t").arg(&duration_str);
+        } else {
+            // 다중 클립 오디오 결합 (concat filter)
+            let mut unique_inputs: Vec<String> = Vec::new();
+            for seg in &active_segments {
+                let path = if seg.file_path.is_empty() { input_path.clone() } else { seg.file_path.clone() };
+                if !unique_inputs.contains(&path) {
+                    unique_inputs.push(path);
+                }
+            }
+            for input in &unique_inputs {
+                cmd.arg("-i").arg(input);
+            }
+
+            let mut filter_str = String::new();
+            let mut labels = String::new();
+            for (idx, seg) in active_segments.iter().enumerate() {
+                let path = if seg.file_path.is_empty() { input_path.clone() } else { seg.file_path.clone() };
+                let input_idx = unique_inputs.iter().position(|r| r == &path).unwrap_or(0);
+                let duration = (seg.end - seg.start).max(0.1);
+                
+                filter_str.push_str(&format!(
+                    "[{}:a]atrim=start={:.3}:duration={:.3},asetpts=PTS-STARTPTS[a{}];",
+                    input_idx, seg.start, duration, idx
+                ));
+                labels.push_str(&format!("[a{}]", idx));
+            }
+            filter_str.push_str(&format!("{}concat=n={}:v=0:a=1[aout]", labels, active_segments.len()));
+            cmd.arg("-filter_complex").arg(filter_str);
+            cmd.arg("-map").arg("[aout]");
         }
 
+        cmd.arg("-vn"); // 비디오 스트림 제거
 
-        // CRF 압축률 결정 (기본값 23)
-        let crf_val = crf.unwrap_or(23);
-        cmd.arg("-crf").arg(crf_val.to_string());
-        cmd.arg("-preset").arg("fast");
+        if bitrate_setting == "original" {
+            let seg = &active_segments[0];
+            let src_path = if seg.file_path.is_empty() { &input_path } else { &seg.file_path };
+            let in_codec = get_audio_codec(&app_handle, src_path).unwrap_or_default();
+            let is_compatible = match target_fmt.as_str() {
+                "mp3" => in_codec == "mp3",
+                "m4a" => in_codec == "aac",
+                "wav" => in_codec.starts_with("pcm"),
+                _ => false,
+            };
+
+            if is_compatible && !is_speed_changed && !is_multi_segment {
+                cmd.arg("-c:a").arg("copy");
+            } else {
+                match target_fmt.as_str() {
+                    "mp3" => {
+                        cmd.arg("-c:a").arg("libmp3lame").arg("-b:a").arg("320k");
+                    }
+                    "m4a" => {
+                        cmd.arg("-c:a").arg("aac").arg("-b:a").arg("320k");
+                    }
+                    "wav" => {
+                        cmd.arg("-c:a").arg("pcm_s16le");
+                    }
+                    _ => {
+                        cmd.arg("-c:a").arg("libmp3lame").arg("-b:a").arg("320k");
+                    }
+                }
+            }
+        } else {
+            match target_fmt.as_str() {
+                "mp3" => {
+                    cmd.arg("-c:a").arg("libmp3lame").arg("-b:a").arg(&bitrate_setting);
+                }
+                "m4a" => {
+                    cmd.arg("-c:a").arg("aac").arg("-b:a").arg(&bitrate_setting);
+                }
+                "wav" => {
+                    cmd.arg("-c:a").arg("pcm_s16le");
+                }
+                _ => {
+                    cmd.arg("-c:a").arg("libmp3lame").arg("-b:a").arg(&bitrate_setting);
+                }
+            }
+        }
+
+        if is_speed_changed && !is_multi_segment {
+            cmd.arg("-af").arg(build_atempo_filter(speed));
+        }
+    } else {
+        // [일반 비디오 내보내기]
+        let actual_use_copy = use_copy && !is_speed_changed && !muted && !is_multi_segment;
+
+        if !is_multi_segment {
+            let seg = &active_segments[0];
+            let src_path = if seg.file_path.is_empty() { &input_path } else { &seg.file_path };
+            let start_str = format!("{:.3}", seg.start);
+            let duration_str = format!("{:.3}", seg.end - seg.start);
+            cmd.arg("-ss").arg(&start_str);
+            cmd.arg("-t").arg(&duration_str);
+            cmd.arg("-i").arg(src_path);
+        } else {
+            let mut unique_inputs: Vec<String> = Vec::new();
+            for seg in &active_segments {
+                let path = if seg.file_path.is_empty() { input_path.clone() } else { seg.file_path.clone() };
+                if !unique_inputs.contains(&path) {
+                    unique_inputs.push(path);
+                }
+            }
+            for input in &unique_inputs {
+                cmd.arg("-i").arg(input);
+            }
+        }
+
+        if actual_use_copy {
+            cmd.arg("-c").arg("copy");
+        } else {
+            if fps != "original" {
+                cmd.arg("-r").arg(&fps);
+            }
+            cmd.arg("-c:v").arg("libx264");
+
+            if is_multi_segment {
+                let (base_w, base_h) = get_video_resolution(&app_handle, &input_path);
+                let raw_w = crop_w.unwrap_or(base_w);
+                let raw_h = crop_h.unwrap_or(base_h);
+                let target_w = (raw_w / 2) * 2;
+                let target_h = (raw_h / 2) * 2;
+
+                let mut unique_inputs: Vec<String> = Vec::new();
+                let mut input_has_audio: Vec<bool> = Vec::new();
+                for seg in &active_segments {
+                    let path = if seg.file_path.is_empty() { input_path.clone() } else { seg.file_path.clone() };
+                    if !unique_inputs.contains(&path) {
+                        let has_a = has_audio_stream(&app_handle, &path);
+                        unique_inputs.push(path);
+                        input_has_audio.push(has_a);
+                    }
+                }
+
+                let mut fc_parts = Vec::new();
+                let count = active_segments.len();
+
+                for (i, seg) in active_segments.iter().enumerate() {
+                    let path = if seg.file_path.is_empty() { input_path.clone() } else { seg.file_path.clone() };
+                    let input_idx = unique_inputs.iter().position(|p| p == &path).unwrap_or(0);
+                    let start_s = format!("{:.3}", seg.start);
+                    let end_s = format!("{:.3}", seg.end);
+                    let dur_s = format!("{:.3}", (seg.end - seg.start).max(0.1));
+
+                    let crop_filter = if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
+                        format!("crop={}:{}:{}:{},", w, h, x, y)
+                    } else {
+                        "".to_string()
+                    };
+
+                    fc_parts.push(format!(
+                        "[{}:v]trim=start={}:end={},setpts=PTS-STARTPTS,{}scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2,setsar=1[v{}]",
+                        input_idx, start_s, end_s, crop_filter, target_w, target_h, target_w, target_h, i
+                    ));
+
+                    if !muted {
+                        if input_has_audio[input_idx] {
+                            fc_parts.push(format!(
+                                "[{}:a]atrim=start={}:end={},asetpts=PTS-STARTPTS[a{}]",
+                                input_idx, start_s, end_s, i
+                            ));
+                        } else {
+                            fc_parts.push(format!(
+                                "anullsrc=r=48000:cl=mono,atrim=end={},asetpts=PTS-STARTPTS[a{}]",
+                                dur_s, i
+                            ));
+                        }
+                    }
+                }
+
+                let mut concat_inputs = String::new();
+                for i in 0..count {
+                    if !muted {
+                        concat_inputs.push_str(&format!("[v{}][a{}]", i, i));
+                    } else {
+                        concat_inputs.push_str(&format!("[v{}]", i));
+                    }
+                }
+
+                let a_opt = if muted { 0 } else { 1 };
+                fc_parts.push(format!(
+                    "{}concat=n={}:v=1:a={}[outv_raw]{}",
+                    concat_inputs,
+                    count,
+                    a_opt,
+                    if !muted { "[outa_raw]" } else { "" }
+                ));
+
+                let mut outv_last = "[outv_raw]".to_string();
+                let mut outa_last = if !muted { "[outa_raw]".to_string() } else { "".to_string() };
+
+                if is_speed_changed {
+                    let pts_mult = 1.0 / speed;
+                    let next_v = "[v_speed]".to_string();
+                    fc_parts.push(format!("{}setpts={:.4}*PTS{}", outv_last, pts_mult, next_v));
+                    outv_last = next_v;
+
+                    if !muted {
+                        let next_a = "[a_speed]".to_string();
+                        let atempo = build_atempo_filter(speed);
+                        fc_parts.push(format!("{}{}{}", outa_last, atempo, next_a));
+                        outa_last = next_a;
+                    }
+                }
+
+                cmd.arg("-filter_complex").arg(fc_parts.join(";"));
+                cmd.arg("-map").arg(&outv_last);
+                if !muted {
+                    cmd.arg("-c:a").arg("aac");
+                    cmd.arg("-map").arg(&outa_last);
+                } else {
+                    cmd.arg("-an");
+                }
+            } else {
+                if muted {
+                    cmd.arg("-an");
+                } else {
+                    cmd.arg("-c:a").arg("aac");
+                    if is_speed_changed {
+                        cmd.arg("-af").arg(build_atempo_filter(speed));
+                    }
+                }
+
+                let mut vf_filters = Vec::new();
+                if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
+                    vf_filters.push(format!("crop={}:{}:{}:{}", w, h, x, y));
+                }
+                if is_speed_changed {
+                    let pts_mult = 1.0 / speed;
+                    vf_filters.push(format!("setpts={:.4}*PTS", pts_mult));
+                }
+                if !vf_filters.is_empty() {
+                    cmd.arg("-vf").arg(vf_filters.join(","));
+                }
+            }
+
+            let crf_val = crf.unwrap_or(23);
+            cmd.arg("-crf").arg(crf_val.to_string());
+            cmd.arg("-preset").arg("fast");
+        }
     }
 
     cmd.arg(&output_path);
@@ -240,10 +686,11 @@ async fn get_neighbor_files(current_path: String) -> Result<Vec<String>, String>
     let parent = path.parent().ok_or_else(|| "부모 디렉터리가 존재하지 않습니다.".to_string())?;
     let mut files = Vec::new();
     
-    // 지원하는 미디어 확장자 목록
+    // 지원하는 미디어 확장자 목록 (비디오, 이미지 & 오디오)
     let supported_extensions = [
         "mp4", "webm", "mkv", "avi", "mov", "ogv", "3gp", // 비디오
-        "png", "jpg", "jpeg", "webp", "gif", "bmp"         // 이미지
+        "png", "jpg", "jpeg", "webp", "gif", "bmp",        // 이미지
+        "mp3", "m4a", "wav", "flac", "aac", "ogg", "opus", "wma" // 오디오
     ];
     
     if let Ok(entries) = fs::read_dir(parent) {
@@ -319,118 +766,83 @@ async fn export_image(
     }
 }
 
+// 실시간 움짤(GIF/WebP) 인코딩 미리보기 생성 및 바이트 용량 반환 커맨드
 #[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-// 백그라운드 스프라이트 시트 메타데이터 구조체
-#[derive(serde::Serialize)]
-struct SpriteSheetInfo {
-    sprite_path: String,
-    tile_width: u32,
-    tile_height: u32,
-    cols: u32,
-    rows: u32,
-    interval: f64,
-    total_count: u32,
-}
-
-// 백그라운드에서 동영상의 저해상도 썸네일 그리드 스프라이트 시트를 생성하는 커맨드
-#[tauri::command]
-async fn generate_sprite_sheet(
+async fn generate_gif_preview(
     app_handle: tauri::AppHandle,
     input_path: String,
-    duration: f64,
-) -> Result<SpriteSheetInfo, String> {
-    if duration <= 0.0 {
-        return Err("유효하지 않은 동영상 길이입니다.".to_string());
-    }
+    start_time: f64,
+    end_time: f64,
+    gif_fps: String,
+    gif_quality: u32,
+    gif_format: String,
+    crop_x: Option<u32>,
+    crop_y: Option<u32>,
+    crop_w: Option<u32>,
+    crop_h: Option<u32>,
+    export_speed: Option<f64>,
+) -> Result<(String, u64), String> {
+    let ffmpeg = get_ffmpeg_path(&app_handle);
+    let _speed = export_speed.unwrap_or(1.0);
+    
+    // 미리보기 인코딩은 초고속 반응성을 위해 최대 4초로 제한
+    let duration = (end_time - start_time).max(0.1).min(4.0);
+    let start_str = format!("{:.3}", start_time);
+    let duration_str = format!("{:.3}", duration);
 
-    // 1. 썸네일 추출 간격 결정 (60초 이내: 1초, 300초 이내: 2초, 그 이상: 5초)
-    let interval = if duration <= 60.0 {
-        1.0
-    } else if duration <= 300.0 {
-        2.0
+    let temp_dir = std::env::temp_dir();
+    let file_ext = if gif_format == "webp" { "webp" } else { "gif" };
+    let temp_filename = format!("okita_preview_{}.{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(), file_ext);
+    let temp_path = temp_dir.join(temp_filename);
+    let temp_path_str = temp_path.to_string_lossy().to_string();
+
+    let scale_ratio = (gif_quality as f64) / 100.0;
+    let scale_filter = format!("scale='trunc(iw*{:.4}/2)*2':'trunc(ih*{:.4}/2)*2'", scale_ratio, scale_ratio);
+
+    let crop_filter_str = if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
+        format!("crop={}:{}:{}:{},", w, h, x, y)
     } else {
-        5.0
+        "".to_string()
     };
 
-    let total_count = (duration / interval).ceil() as u32;
-    let total_count = total_count.max(1).min(120); // 최대 120개 썸네일로 제한하여 초고속 생성
-    let cols = 10u32;
-    let rows = (total_count + cols - 1) / cols;
-    let tile_width = 120u32;
-    let tile_height = 68u32;
-
-    // 2. 임시 캐시 디렉토리 및 파일 경로 생성 (파일명 해시 활용)
-    let temp_dir = std::env::temp_dir().join("okita_sprites");
-    let _ = fs::create_dir_all(&temp_dir);
-
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    input_path.hash(&mut hasher);
-    duration.to_bits().hash(&mut hasher);
-    let file_hash = hasher.finish();
-
-    let sprite_path = temp_dir.join(format!("sprite_{}.jpg", file_hash));
-    let sprite_path_str = sprite_path.to_string_lossy().to_string();
-
-    // 3. 기존에 캐시된 파일이 이미 존재하는 경우 재사용하여 0ms 반환
-    if sprite_path.exists() {
-        if let Ok(meta) = fs::metadata(&sprite_path) {
-            if meta.len() > 0 {
-                return Ok(SpriteSheetInfo {
-                    sprite_path: sprite_path_str,
-                    tile_width,
-                    tile_height,
-                    cols,
-                    rows,
-                    interval,
-                    total_count,
-                });
-            }
-        }
-    }
-
-    // 4. FFmpeg 비동기 타일링 실행
-    let ffmpeg = get_ffmpeg_path(&app_handle);
     let mut cmd = Command::new(&ffmpeg);
     #[cfg(target_os = "windows")]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-
+    
     cmd.arg("-y");
-    cmd.arg("-ss").arg("0");
+    cmd.arg("-ss").arg(&start_str);
+    cmd.arg("-t").arg(&duration_str);
     cmd.arg("-i").arg(&input_path);
 
-    let vf_filter = format!("fps=1/{:.2},scale=120:-1,tile={}x{}", interval, cols, rows);
-    cmd.arg("-vf").arg(vf_filter);
-    cmd.arg("-vframes").arg("1");
-    cmd.arg("-q:v").arg("5"); // 적절한 JPEG 용량 최적화 품질
-    cmd.arg(&sprite_path_str);
+    if gif_format == "webp" {
+        cmd.arg("-vcodec").arg("libwebp");
+        cmd.arg("-loop").arg("0");
+        cmd.arg("-vf").arg(format!("{}fps={},{}", crop_filter_str, gif_fps, scale_filter));
+    } else {
+        let fc = format!("[0:v]{}fps={},{},split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse", crop_filter_str, gif_fps, scale_filter);
+        cmd.arg("-filter_complex").arg(fc);
+    }
+
+    cmd.arg(&temp_path_str);
 
     let output = cmd.output();
-
     match output {
         Ok(out) => {
-            if out.status.success() && sprite_path.exists() {
-                Ok(SpriteSheetInfo {
-                    sprite_path: sprite_path_str,
-                    tile_width,
-                    tile_height,
-                    cols,
-                    rows,
-                    interval,
-                    total_count,
-                })
+            if out.status.success() {
+                let size = fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0);
+                Ok((temp_path_str, size))
             } else {
                 let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                Err(format!("스프라이트 생성 실패: {}", stderr))
+                Err(format!("FFmpeg 미리보기 인코딩 실패: {}", stderr))
             }
         }
         Err(e) => Err(format!("FFmpeg 실행 실패: {}", e)),
     }
+}
+
+#[tauri::command]
+fn greet(name: &str) -> String {
+    format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -458,7 +870,7 @@ pub fn run() {
             get_startup_file,
             get_neighbor_files,
             export_image,
-            generate_sprite_sheet
+            generate_gif_preview
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

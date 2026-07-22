@@ -42,7 +42,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ fileName }) => {
     >
       {/* App Logo & Title */}
       <div data-tauri-drag-region className="flex items-center gap-2 pointer-events-none max-w-[70%] truncate">
-        <span className="w-3 h-3 rounded-full bg-indigo-500 animate-pulse flex-shrink-0"></span>
+        <img src="/icon.png" className="w-4 h-4 rounded-md flex-shrink-0 object-contain shadow-sm" alt="App Icon" />
         <span className="text-xs font-semibold tracking-wider text-white/90 truncate">
           OKITA CANVAS{fileName ? ` - ${fileName}` : ""}
         </span>

@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "0.1.3"
+version = "0.2.1"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -25,3 +25,11 @@ serde_json = "1"
 window-vibrancy = "0.7.1"
 tauri-plugin-dialog = "2.7.1"
 
+# ==========================================
+# ⚡ 배포 빌드(Release) 최적화 및 속도 개선 설정 추가
+# ==========================================
+[profile.release]
+opt-level = 3        # 앱 실행 속도는 최대 효율(레벨 3) 유지
+lto = "thin"         # 무겁고 느린 전체 LTO 대신 병렬 분석이 가능한 가벼운 LTO 방식 채택
+codegen-units = 16   # 빌드 작업을 여러 코어로 병렬 처리하여 링킹 속도 대폭 상향
+strip = true         # 링커가 필요 없는 불필요한 디버그 메타데이터를 제거하여 마지막 조립 시간 및 파일 용량 축소

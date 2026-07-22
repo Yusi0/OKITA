@@ -1,4 +1,5 @@
 import React from "react";
+import { TOOLTIPS } from "../constants/tooltips";
 import {
   Play,
   Pause,
@@ -12,7 +13,14 @@ import {
   Crop,
   Camera
 } from "lucide-react";
-import { SpriteSheetInfo } from "../App";
+
+export interface ClipSegment {
+  id: string;
+  filePath: string;
+  start: number;
+  end: number;
+  title?: string;
+}
 
 interface ControlBarProps {
   isPlaying: boolean;
@@ -44,7 +52,11 @@ interface ControlBarProps {
   videoSrc: string | null;
   isEditMuted?: boolean;
   onToggleEditMute?: () => void;
-  spriteData?: SpriteSheetInfo | null;
+  clips?: ClipSegment[];
+  selectedClipId?: string | null;
+  onSelectClip?: (id: string) => void;
+  dropInsertIndex?: number | null;
+  isDraggingAsset?: boolean;
 }
 
 const formatTime = (seconds: number) => {
@@ -71,9 +83,9 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   hasVideo,
   isEditMode,
   onToggleEdit,
-  trimStart,
-  trimEnd,
-  onTrimChange,
+  trimStart: _trimStart,
+  trimEnd: _trimEnd,
+  onTrimChange: _onTrimChange,
   onSaveClick,
   isCropMode,
   onToggleCrop,
@@ -84,15 +96,25 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   videoSrc,
   isEditMuted = false,
   onToggleEditMute,
-  spriteData
+  clips,
+  selectedClipId,
+  onSelectClip,
+  dropInsertIndex,
+  isDraggingAsset
 }) => {
-  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const containerRef = React.useRef<HTMLDivElement>(null);
-  
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
   // 썸네일 미리보기 오프스크린 요소 Refs & States
   const previewVideoRef = React.useRef<HTMLVideoElement>(null);
   const previewCanvasRef = React.useRef<HTMLCanvasElement>(null);
   const [hoverInfo, setHoverInfo] = React.useState<{ x: number; time: number } | null>(null);
+
+  const totalEditedDuration = isEditMode && clips && clips.length > 0
+    ? clips.reduce((acc, c) => acc + (c.end - c.start), 0)
+    : duration;
+
+  const editedCurrentTime = currentTime;
 
   // 마우스 타임라인 호버 시 썸네일 미리보기 시간 계산
   const handleTimelineMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -100,11 +122,15 @@ export const ControlBar: React.FC<ControlBarProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
     const percent = x / rect.width;
-    const time = percent * duration;
-    setHoverInfo({ x, time });
 
-    if (previewVideoRef.current && Math.abs(previewVideoRef.current.currentTime - time) > 0.15) {
-      previewVideoRef.current.currentTime = time;
+    const targetHoverTime = isEditMode
+      ? percent * totalEditedDuration
+      : percent * duration;
+
+    setHoverInfo({ x, time: targetHoverTime });
+
+    if (previewVideoRef.current) {
+      previewVideoRef.current.currentTime = targetHoverTime;
     }
   };
 
@@ -136,25 +162,14 @@ export const ControlBar: React.FC<ControlBarProps> = ({
       const rect = containerRef.current.getBoundingClientRect();
       const clickX = moveEvent.clientX - rect.left;
       const percent = Math.max(0, Math.min(1, clickX / rect.width));
-      const time = percent * duration;
 
-      if (type === "start") {
-        if (time < trimEnd - 0.1) {
-          onTrimChange(time, trimEnd);
-          if (currentTime < time) {
-            onSeek(time);
-          }
+      if (type === "seek") {
+        if (isEditMode) {
+          const targetTimelineT = percent * totalEditedDuration;
+          onSeek(targetTimelineT);
+        } else {
+          onSeek(percent * duration);
         }
-      } else if (type === "end") {
-        if (time > trimStart + 0.1) {
-          onTrimChange(trimStart, time);
-          if (currentTime > time) {
-            onSeek(time);
-          }
-        }
-      } else if (type === "seek") {
-        const boundedTime = Math.max(trimStart, Math.min(trimEnd, time));
-        onSeek(boundedTime);
       }
     };
 
@@ -167,30 +182,15 @@ export const ControlBar: React.FC<ControlBarProps> = ({
     document.addEventListener("mouseup", handleMouseUp);
   };
 
-  const handleTrackClick = (e: React.MouseEvent) => {
-    if (e.target !== e.currentTarget && !(e.target as HTMLElement).classList.contains("track-clickable")) {
-      return;
-    }
-    if (!containerRef.current || !hasVideo || duration === 0) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const percent = Math.max(0, Math.min(1, clickX / rect.width));
-    const time = percent * duration;
-    const boundedTime = Math.max(trimStart, Math.min(trimEnd, time));
-    onSeek(boundedTime);
-  };
-
-  // 백분율 위치 환산
-  const startPercent = duration > 0 ? (trimStart / duration) * 100 : 0;
-  const endPercent = duration > 0 ? (trimEnd / duration) * 100 : 100;
-  const activeWidthPercent = endPercent - startPercent;
-  const currentPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  // 백분율 위치 환산 (편집 모드 시 편집 타임라인 기준 좌표계 사용)
+  const currentPercent = isEditMode
+    ? (totalEditedDuration > 0 ? (editedCurrentTime / totalEditedDuration) * 100 : 0)
+    : (duration > 0 ? (currentTime / duration) * 100 : 0);
 
   return (
     <div
-      className={`absolute bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl z-40 transition-transform duration-500 cubic-bezier(0.16, 1, 0.3, 1) transform ${
-        isVisible ? "translate-y-0" : "translate-y-[calc(100%+32px)] pointer-events-none"
-      }`}
+      className={`absolute bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl z-40 transition-transform duration-500 cubic-bezier(0.16, 1, 0.3, 1) transform ${isVisible ? "translate-y-0" : "translate-y-[calc(100%+32px)] pointer-events-none"
+        }`}
     >
       {/* 썸네일 미리보기용 비디오 엘리먼트 (오프스크린) */}
       {videoSrc && !isImage && (
@@ -206,14 +206,14 @@ export const ControlBar: React.FC<ControlBarProps> = ({
 
       {/* Control Bar Container with Glassmorphism */}
       <div className="relative flex flex-col gap-3 px-6 py-4 rounded-2xl bg-black/15 backdrop-blur-xl border border-white/5 shadow-xl">
-        
+
         {/* Timeline Slider / Edit Trimming Slider */}
         {!isImage && (
           <div className="flex items-center w-full gap-3 group">
             <span className="text-[11px] font-mono text-white/70 select-none min-w-[35px]">
-              {formatTime(isEditMode ? trimStart : currentTime)}
+              {formatTime(editedCurrentTime)}
             </span>
-            
+
             {!isEditMode ? (
               /* 일반 모드: 재생 시커 슬라이더 */
               <div
@@ -244,149 +244,139 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   className="absolute inset-0 w-full h-full bg-transparent appearance-none cursor-pointer focus:outline-none z-20 disabled:cursor-not-allowed"
                 />
 
-                {/* 재생바 마우스 호버 썸네일 & 타임코드 툴팁 (하이브리드: Canvas fallback -> GPU Sprite Sheet) */}
+                {/* 재생바 마우스 호버 타임코드 툴팁 */}
                 {hoverInfo && (
                   <div
-                    className="absolute -top-[118px] pointer-events-none z-50 -translate-x-1/2 flex flex-col items-center transition-opacity duration-150 animate-fade-in"
+                    className="absolute -top-9 pointer-events-none z-50 -translate-x-1/2 flex flex-col items-center transition-opacity duration-150 animate-fade-in"
                     style={{ left: `${hoverInfo.x}px` }}
                   >
-                    <div className="p-1 rounded-xl bg-neutral-900/90 border border-white/20 shadow-2xl backdrop-blur-md overflow-hidden flex flex-col items-center">
-                      {spriteData && spriteData.sprite_url ? (
-                        (() => {
-                          const thumbIndex = Math.min(
-                            spriteData.total_count - 1,
-                            Math.max(0, Math.floor(hoverInfo.time / spriteData.interval))
-                          );
-                          const col = thumbIndex % spriteData.cols;
-                          const row = Math.floor(thumbIndex / spriteData.cols);
-                          const bgX = -col * spriteData.tile_width;
-                          const bgY = -row * spriteData.tile_height;
-
-                          return (
-                            <div
-                              className="w-[120px] h-[68px] rounded-lg border border-white/10 shadow-inner bg-no-repeat overflow-hidden"
-                              style={{
-                                backgroundImage: `url(${spriteData.sprite_url})`,
-                                backgroundPosition: `${bgX}px ${bgY}px`,
-                                backgroundSize: `${spriteData.cols * spriteData.tile_width}px ${spriteData.rows * spriteData.tile_height}px`
-                              }}
-                            />
-                          );
-                        })()
-                      ) : (
-                        <canvas
-                          ref={previewCanvasRef}
-                          className="w-[120px] rounded-lg bg-black border border-white/10 object-contain shadow-inner"
-                        />
-                      )}
-                      <span className="text-[10px] font-mono font-bold text-indigo-300 mt-1 px-2 py-0.5 rounded bg-white/10 tracking-wider">
-                        {formatTime(hoverInfo.time)}
-                      </span>
+                    <div className="px-2.5 py-1 rounded-md bg-neutral-900/95 border border-white/20 shadow-xl text-[11px] font-mono font-semibold text-white whitespace-nowrap">
+                      {formatTime(hoverInfo.time)}
                     </div>
-                    <div className="w-2 h-2 bg-neutral-900/90 border-r border-b border-white/20 rotate-45 -mt-1"></div>
+                    <div className="w-2 h-2 bg-neutral-900/95 border-r border-b border-white/20 rotate-45 -mt-1"></div>
                   </div>
                 )}
               </div>
             ) : (
-              /* 편집 모드: 마우스 드래깅 기반 커스텀 양방향 편집 슬라이더 */
+              /* 편집 모드: 32px 멀티 클립 타임라인 트랙 */
               <div
                 ref={containerRef}
-                onClick={handleTrackClick}
                 onMouseMove={handleTimelineMouseMove}
                 onMouseLeave={handleTimelineMouseLeave}
-                className="relative flex-1 flex items-center h-5 select-none track-clickable cursor-pointer"
+                className="relative flex-1 flex items-center h-8 bg-neutral-900/80 border border-white/10 rounded-xl overflow-visible select-none h-[32px]"
               >
-                {/* 1. 회색 배경 트랙 */}
-                <div className="absolute left-0 right-0 h-1.5 bg-white/15 rounded-lg pointer-events-none track-clickable"></div>
-
-                {/* 2. 파란색 선택구간 강조 트랙 */}
-                <div
-                  className="absolute h-1.5 bg-indigo-500/35 rounded-lg pointer-events-none z-10"
-                  style={{
-                    left: `${startPercent}%`,
-                    width: `${activeWidthPercent}%`
-                  }}
-                ></div>
-
-                {/* 3. 재생 헤드 핀 */}
-                {duration > 0 && (
-                  <div
-                    className="absolute z-30 cursor-grab active:cursor-grabbing flex flex-col items-center -translate-x-1/2"
-                    style={{ left: `${currentPercent}%`, top: '-16px' }}
-                    onMouseDown={startDrag("seek")}
-                  >
-                    <div className="w-3 h-3 rounded-full bg-indigo-500 border border-white shadow"></div>
-                    <div className="w-[2px] h-[14px] bg-indigo-500"></div>
-                  </div>
-                )}
-
-                {/* 4. 편집 구간 자르기 조절 바 - 시작점 */}
-                <div
-                  className="absolute z-40 cursor-ew-resize flex items-center justify-center -translate-x-1/2 group/stick"
-                  style={{ left: `${startPercent}%` }}
-                  onMouseDown={startDrag("start")}
-                  title="잘라낼 시작 시점 설정"
-                >
-                  <div className="w-[7px] h-5 bg-white border border-neutral-300 rounded shadow group-hover/stick:bg-indigo-300 active:bg-indigo-500 transition-colors"></div>
-                </div>
-
-                {/* 5. 편집 구간 자르기 조절 바 - 종료점 */}
-                <div
-                  className="absolute z-40 cursor-ew-resize flex items-center justify-center -translate-x-1/2 group/stick"
-                  style={{ left: `${endPercent}%` }}
-                  onMouseDown={startDrag("end")}
-                  title="잘라낼 종료 시점 설정"
-                >
-                  <div className="w-[7px] h-5 bg-white border border-neutral-300 rounded shadow group-hover/stick:bg-indigo-300 active:bg-indigo-500 transition-colors"></div>
-                </div>
-
-                {/* 편집 모드 마우스 호버 썸네일 & 타임코드 툴팁 (하이브리드) */}
+                {/* 편집 모드 호버 #n (mm:ss) 툴팁 */}
                 {hoverInfo && (
                   <div
-                    className="absolute -top-[118px] pointer-events-none z-50 -translate-x-1/2 flex flex-col items-center transition-opacity duration-150 animate-fade-in"
+                    className="absolute -top-9 pointer-events-none z-50 -translate-x-1/2 flex flex-col items-center transition-opacity duration-150 animate-fade-in"
                     style={{ left: `${hoverInfo.x}px` }}
                   >
-                    <div className="p-1 rounded-xl bg-neutral-900/90 border border-white/20 shadow-2xl backdrop-blur-md overflow-hidden flex flex-col items-center">
-                      {spriteData && spriteData.sprite_url ? (
-                        (() => {
-                          const thumbIndex = Math.min(
-                            spriteData.total_count - 1,
-                            Math.max(0, Math.floor(hoverInfo.time / spriteData.interval))
-                          );
-                          const col = thumbIndex % spriteData.cols;
-                          const row = Math.floor(thumbIndex / spriteData.cols);
-                          const bgX = -col * spriteData.tile_width;
-                          const bgY = -row * spriteData.tile_height;
-
-                          return (
-                            <div
-                              className="w-[120px] h-[68px] rounded-lg border border-white/10 shadow-inner bg-no-repeat overflow-hidden"
-                              style={{
-                                backgroundImage: `url(${spriteData.sprite_url})`,
-                                backgroundPosition: `${bgX}px ${bgY}px`,
-                                backgroundSize: `${spriteData.cols * spriteData.tile_width}px ${spriteData.rows * spriteData.tile_height}px`
-                              }}
-                            />
-                          );
-                        })()
-                      ) : (
-                        <canvas
-                          ref={previewCanvasRef}
-                          className="w-[120px] rounded-lg bg-black border border-white/10 object-contain shadow-inner"
-                        />
-                      )}
-                      <span className="text-[10px] font-mono font-bold text-indigo-300 mt-1 px-2 py-0.5 rounded bg-white/10 tracking-wider">
-                        {formatTime(hoverInfo.time)}
-                      </span>
+                    <div className="px-2.5 py-1 rounded-md bg-neutral-900/95 border border-white/20 shadow-xl text-[11px] font-mono font-semibold text-white whitespace-nowrap">
+                      {(() => {
+                        if (clips && clips.length > 0) {
+                          let accum = 0;
+                          for (let i = 0; i < clips.length; i++) {
+                            const dur = clips[i].end - clips[i].start;
+                            if (hoverInfo.time >= accum && (hoverInfo.time <= accum + dur || i === clips.length - 1)) {
+                              return `#${i + 1} (${formatTime(hoverInfo.time)})`;
+                            }
+                            accum += dur;
+                          }
+                        }
+                        return formatTime(hoverInfo.time);
+                      })()}
                     </div>
-                    <div className="w-2 h-2 bg-neutral-900/90 border-r border-b border-white/20 rotate-45 -mt-1"></div>
+                    <div className="w-2 h-2 bg-neutral-900/95 border-r border-b border-white/20 rotate-45 -mt-1"></div>
+                  </div>
+                )}
+                {/* 트랙 배경 트랙 라인 */}
+                <div className="absolute left-0 right-0 h-1 bg-white/10 rounded pointer-events-none"></div>
+
+                {/* 멀티 클립 블록들 렌더링 (리플 컷 자석 연속 연결) */}
+                {(() => {
+                  if (!clips || clips.length === 0) return null;
+                  const totalEditedDuration = clips.reduce((acc, c) => acc + (c.end - c.start), 0);
+                  let accum = 0;
+
+                  return clips.map((clip, index) => {
+                    const dur = clip.end - clip.start;
+                    const startPct = totalEditedDuration > 0 ? (accum / totalEditedDuration) * 100 : 0;
+                    const widthPct = totalEditedDuration > 0 ? (dur / totalEditedDuration) * 100 : 0;
+                    accum += dur;
+                    const isSelected = selectedClipId === clip.id;
+
+                    return (
+                      <div
+                        key={clip.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onSelectClip) onSelectClip(clip.id);
+                        }}
+                        className={`absolute h-7 top-[2px] rounded-lg border transition-all flex items-center justify-between px-2 text-[10px] font-mono font-bold select-none cursor-pointer overflow-hidden ${isSelected
+                            ? "bg-indigo-500/60 border-2 border-indigo-300 ring-2 ring-indigo-400/50 text-white shadow-lg z-20"
+                            : "bg-indigo-600/30 border-indigo-500/40 hover:bg-indigo-500/45 text-white/80 z-10"
+                          }`}
+                        style={{
+                          left: `${startPct}%`,
+                          width: `${Math.max(0.5, widthPct)}%`
+                        }}
+                        title={`클립 #${index + 1} (${formatTime(dur)})`}
+                      >
+                        <span className="truncate">#{index + 1}</span>
+                        <span className="text-[9px] opacity-75 hidden sm:inline ml-1">
+                          {formatTime(dur)}
+                        </span>
+                      </div>
+                    );
+                  });
+                })()}
+
+                {/* 프리미어 프로 스타일 드래그 앤 드롭 가상 삽입 라인 마커 (Ghost Line Preview) */}
+                {isDraggingAsset && dropInsertIndex !== undefined && dropInsertIndex !== null && (() => {
+                  if (!clips || clips.length === 0) return null;
+                  const totalEditedDuration = clips.reduce((acc, c) => acc + (c.end - c.start), 0);
+                  let ghostPos = 0;
+                  if (dropInsertIndex === 0) {
+                    ghostPos = 0;
+                  } else if (dropInsertIndex >= clips.length) {
+                    ghostPos = 100;
+                  } else {
+                    let accum = 0;
+                    for (let i = 0; i < dropInsertIndex; i++) {
+                      accum += (clips[i].end - clips[i].start);
+                    }
+                    ghostPos = totalEditedDuration > 0 ? (accum / totalEditedDuration) * 100 : 0;
+                  }
+
+                  return (
+                    <div
+                      className="absolute z-50 pointer-events-none flex flex-col items-center -translate-x-1/2 transition-all duration-75"
+                      style={{ left: `${ghostPos}%`, top: "-6px" }}
+                    >
+                      <div className="w-0 h-0 border-x-[5px] border-x-transparent border-t-[6px] border-t-cyan-400 mb-0.5 animate-bounce"></div>
+                      <div className="w-[3px] h-[36px] bg-cyan-400 rounded-full shadow-[0_0_14px_#22d3ee]"></div>
+                      <div className="w-0 h-0 border-x-[5px] border-x-transparent border-b-[6px] border-b-cyan-400 mt-0.5 animate-bounce"></div>
+                    </div>
+                  );
+                })()}
+
+                {/* 재생 헤드 핀 (상단 핀 머리만 드래그 탐색 허용) */}
+                {(duration > 0 || (isEditMode && totalEditedDuration > 0)) && (
+                  <div
+                    className="absolute z-30 cursor-grab active:cursor-grabbing flex flex-col items-center -translate-x-1/2"
+                    style={{ left: `${Math.max(0, Math.min(100, isNaN(currentPercent) ? 0 : currentPercent))}%`, top: '-14px' }}
+                    onMouseDown={startDrag("seek")}
+                    title="플레이헤드 이동 (드래그)"
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-indigo-500 border-2 border-white shadow-md hover:scale-110 active:scale-95 transition-transform"></div>
+                    <div className="w-[2px] h-[32px] bg-indigo-400 shadow"></div>
                   </div>
                 )}
               </div>
             )}
 
             <span className="text-[11px] font-mono text-white/70 select-none min-w-[35px]">
-              {formatTime(isEditMode ? (trimEnd - trimStart) / playbackSpeed : duration)}
+              {formatTime(isEditMode ? (clips ? clips.reduce((acc, c) => acc + (c.end - c.start), 0) / playbackSpeed : duration) : duration)}
             </span>
           </div>
         )}
@@ -413,12 +403,11 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                 onToggleEdit();
                 (e.currentTarget as HTMLButtonElement).blur();
               }}
-              className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${
-                isEditMode
+              className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 ${isEditMode
                   ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40"
                   : "text-white/90 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
-              }`}
-              title={isEditMode ? "편집 완료/닫기" : (isImage ? "이미지 크롭 편집" : "비디오 자르기 편집")}
+                }`}
+              title={isEditMode ? "편집 완료/닫기" : (isImage ? "이미지 크롭 편집" : "비디오 멀티 클립 편집")}
             >
               <Scissors className="w-4 h-4" />
             </button>
@@ -430,12 +419,11 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   onToggleCrop();
                   (e.currentTarget as HTMLButtonElement).blur();
                 }}
-                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${
-                  isCropMode
+                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${isCropMode
                     ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40"
                     : "text-white/90 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
-                }`}
-                title={isCropMode ? "화면 자르기(크롭) 끄기" : "화면 자르기(크롭) 켜기"}
+                  }`}
+                title={isCropMode ? TOOLTIPS.controlBar.cropModeDisable : TOOLTIPS.controlBar.cropModeEnable}
               >
                 <Crop className="w-4.5 h-4.5" />
               </button>
@@ -449,7 +437,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   (e.currentTarget as HTMLButtonElement).blur();
                 }}
                 className="flex items-center justify-center w-9 h-9 rounded-lg text-white/90 bg-white/5 hover:bg-indigo-500/20 hover:text-indigo-400 active:bg-white/10 border border-white/5 transition-all duration-150 cursor-pointer"
-                title="현재 프레임 이미지로 저장 (캡처)"
+                title={TOOLTIPS.controlBar.captureFrame}
               >
                 <Camera className="w-4.5 h-4.5" />
               </button>
@@ -467,6 +455,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   }}
                   disabled={!hasVideo}
                   className={`flex items-center justify-center w-11 h-11 rounded-full text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition-all duration-150 hover:scale-105 active:scale-95 disabled:bg-white/5 disabled:text-white/30 disabled:shadow-none disabled:scale-100 disabled:cursor-not-allowed cursor-pointer`}
+                  title={isPlaying ? TOOLTIPS.controlBar.pause : TOOLTIPS.controlBar.play}
                 >
                   {isPlaying ? <Pause className="w-5 h-5 fill-white" /> : <Play className="w-5 h-5 fill-white ml-0.5" />}
                 </button>
@@ -479,7 +468,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                 }}
                 disabled={!hasVideo}
                 className="flex items-center justify-center w-11 h-11 rounded-full text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition-all duration-150 hover:scale-105 active:scale-95 disabled:bg-white/5 disabled:text-white/30 disabled:shadow-none disabled:scale-100 disabled:cursor-not-allowed cursor-pointer"
-                title={isImage ? "크롭된 이미지 저장" : "편집 비디오 저장 설정 열기"}
+                title={TOOLTIPS.controlBar.exportModal}
               >
                 <Save className="w-5 h-5 stroke-white fill-none" />
               </button>
@@ -488,7 +477,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
 
           {/* Right: Playback Speed, Volume & Fullscreen */}
           <div className="flex items-center justify-end gap-3">
-            {/* Speed Button (Click to cycle through 0.5x -> 0.75x -> 1.0x -> 1.25x -> 1.5x -> 2.0x) */}
+            {/* Speed Button */}
             {!isImage && (
               <button
                 disabled={!hasVideo}
@@ -499,21 +488,19 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   onPlaybackSpeedChange(steps[nextIdx]);
                   (e.currentTarget as HTMLButtonElement).blur();
                 }}
-                className={`px-2 py-1 rounded-lg border text-[11px] font-semibold font-mono transition-all duration-150 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                  playbackSpeed !== 1.0
+                className={`px-2 py-1 rounded-lg border text-[11px] font-semibold font-mono transition-all duration-150 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${playbackSpeed !== 1.0
                     ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40 shadow-sm"
                     : "text-white/80 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
-                }`}
-                title={isEditMode ? "클릭 시 편집 배속 변경 (0.5x ~ 2.0x)" : "클릭 시 시청 배속 변경 (0.5x ~ 2.0x)"}
+                  }`}
+                title={TOOLTIPS.controlBar.playbackSpeed}
               >
                 {playbackSpeed.toFixed(2).replace(/\.00$/, "").replace(/\.50$/, ".5")}x
               </button>
             )}
 
-            {/* Volume Control in View Mode vs Mute Toggle Button in Edit Mode */}
+            {/* Volume Control */}
             {!isImage && (
               !isEditMode ? (
-                /* 일반 감상 모드: 음소거 버튼 + 볼륨 슬라이더 */
                 <div className="flex items-center gap-2">
                   <button
                     onClick={(e) => {
@@ -522,11 +509,11 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                     }}
                     disabled={!hasVideo}
                     className="text-white/80 hover:text-white transition-colors duration-150 disabled:text-white/30 disabled:cursor-not-allowed cursor-pointer"
-                    title={isMuted ? "음소거 해제" : "음소거"}
+                    title={isMuted ? TOOLTIPS.controlBar.unmute : TOOLTIPS.controlBar.mute}
                   >
                     {isMuted || volume === 0 ? <VolumeX className="w-4.5 h-4.5 text-rose-400" /> : <Volume2 className="w-4.5 h-4.5" />}
                   </button>
-                  
+
                   {/* Volume Slider Wrapper */}
                   <div className="relative flex items-center h-5 w-16">
                     <div className="absolute left-0 right-0 h-1 bg-white/15 rounded-lg pointer-events-none"></div>
@@ -556,11 +543,10 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                     (e.currentTarget as HTMLButtonElement).blur();
                   }}
                   disabled={!hasVideo}
-                  className={`flex items-center justify-center p-1.5 rounded-lg border transition-all duration-150 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                    isEditMuted
+                  className={`flex items-center justify-center p-1.5 rounded-lg border transition-all duration-150 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${isEditMuted
                       ? "text-rose-400 bg-rose-500/20 border-rose-500/40"
                       : "text-white/80 bg-white/5 hover:bg-white/15 border-white/5"
-                  }`}
+                    }`}
                   title={isEditMuted ? "편집 음소거 켜짐 (오디오 트랙 없이 저장)" : "편집 음소거 끔 (원본 소리로 저장)"}
                 >
                   {isEditMuted ? (
@@ -580,7 +566,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
               }}
               disabled={!hasVideo}
               className="text-white/80 hover:text-white transition-colors duration-150 hover:scale-105 active:scale-95 disabled:text-white/30 disabled:cursor-not-allowed cursor-pointer"
-              title={isFullscreen ? "창 모드로 보기" : "전체화면"}
+              title={TOOLTIPS.controlBar.fullscreen}
             >
               {isFullscreen ? <Minimize className="w-4.5 h-4.5" /> : <Maximize className="w-4.5 h-4.5" />}
             </button>
