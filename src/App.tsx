@@ -1482,6 +1482,7 @@ function App() {
         gifFormat,
         audioBitrate,
         audioFormat,
+        isFlipped: options.isFlipped ?? isFlipped,
         segments: clips.map((c) => ({
           id: c.id,
           filePath: c.filePath || filePath || "",
@@ -1689,21 +1690,19 @@ function App() {
             {/* 움짤 배지 */}
             <AnimatedGifBadge isAnimatedGif={isAnimatedGif} filePath={filePath} />
 
-            {/* 편집 모드 전용 우상단 수평반전(Flip Horizontal) 버튼 (컨트롤바 우측 끝 정렬 & 대형 그림자 효과) */}
+            {/* 편집 모드 전용 우상단 수평반전(Flip Horizontal) 버튼 (배경/프레임 없이 흰 아이콘 + 그림자) */}
             {isEditMode && (
-              <div className="absolute top-6 left-1/2 -translate-x-1/2 w-[90%] max-w-4xl z-30 flex justify-end pointer-events-none">
-                <button
-                  onClick={() => setIsFlipped((prev) => !prev)}
-                  className={`pointer-events-auto p-1.5 transition-all duration-200 cursor-pointer hover:scale-110 active:scale-95 flex items-center justify-center ${
-                    isFlipped
-                      ? "text-indigo-400 drop-shadow-[0_6px_20px_rgba(99,102,241,0.95)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]"
-                      : "text-white opacity-90 hover:opacity-100 drop-shadow-[0_6px_24px_rgba(0,0,0,1)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]"
-                  }`}
-                  title="수평 반전"
-                >
-                  <FlipHorizontal className="w-6 h-6 stroke-[2.2]" />
-                </button>
-              </div>
+              <button
+                onClick={() => setIsFlipped((prev) => !prev)}
+                className={`absolute top-6 right-6 z-30 p-2 transition-all duration-200 cursor-pointer hover:scale-110 active:scale-95 flex items-center justify-center ${
+                  isFlipped
+                    ? "text-indigo-400 drop-shadow-[0_4px_12px_rgba(99,102,241,0.8)]"
+                    : "text-white opacity-85 hover:opacity-100 drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)]"
+                }`}
+                title="수평 반전"
+              >
+                <FlipHorizontal className="w-6 h-6 stroke-[2.2]" />
+              </button>
             )}
 
             {/* 오디오 비주얼라이저 오버레이 */}
@@ -1862,6 +1861,7 @@ function App() {
         isAudioOnly={isAudio}
         cropArea={cropArea}
         clips={clips}
+        isFlipped={isFlipped}
       />
 
       {/* 플로팅 컨트롤 바 */}

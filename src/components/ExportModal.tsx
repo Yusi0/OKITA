@@ -22,6 +22,7 @@ export interface ExportOptions {
   // 오디오 옵션
   audioBitrate: AudioBitrate;
   audioFormat: AudioFormat;
+  isFlipped?: boolean;
 }
 
 interface ExportModalProps {
@@ -43,6 +44,7 @@ interface ExportModalProps {
   cropArea?: { x: number; y: number; w: number; h: number };
   isAudioOnly?: boolean;
   clips?: ClipSegment[];
+  isFlipped?: boolean;
 }
 
 const CRF_OPTIONS = [18, 23, 28, 32];
@@ -103,7 +105,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   initialTab = "video",
   cropArea,
   isAudioOnly = false,
-  clips
+  clips,
+  isFlipped = false
 }) => {
   // 상단 탭 선택: "video" | "gif" | "audio"
   const [activeTab, setActiveTab] = useState<ExportType>(isAudioOnly ? "audio" : initialTab);
@@ -300,7 +303,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             setTargetDimensions({ w: targetW, h: targetH });
           }
 
-          // 1. 모달 메인 미리보기 캔버스 렌더링 (크롭 & 256색 팔레트 양자화 렌더링)
+          // 1. 모달 메인 미리보기 캔버스 렌더링 (크롭 & 수평반전 & 256색 팔레트 양자화 렌더링)
           if (previewCanvasRef.current) {
             const canvas = previewCanvasRef.current;
             if (canvas.width !== targetW || canvas.height !== targetH) {
@@ -310,7 +313,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             const ctx = canvas.getContext("2d");
             if (ctx) {
               ctx.imageSmoothingEnabled = false; // 도트/픽셀 화질 저하 렌더링 적용
+              ctx.save();
+              if (isFlipped) {
+                ctx.translate(targetW, 0);
+                ctx.scale(-1, 1);
+              }
               ctx.drawImage(video, sx, sy, sw, sh, 0, 0, targetW, targetH);
+              ctx.restore();
               if (gifFormat === "gif") {
                 apply256ColorPalette(ctx, targetW, targetH);
               }
@@ -327,7 +336,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             const ctx = canvas.getContext("2d");
             if (ctx) {
               ctx.imageSmoothingEnabled = false;
+              ctx.save();
+              if (isFlipped) {
+                ctx.translate(targetW, 0);
+                ctx.scale(-1, 1);
+              }
               ctx.drawImage(video, sx, sy, sw, sh, 0, 0, targetW, targetH);
+              ctx.restore();
               if (gifFormat === "gif") {
                 apply256ColorPalette(ctx, targetW, targetH);
               }
@@ -355,6 +370,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     cropArea,
     isEnlargedOpen,
     targetDimensions.w,
+    isFlipped,
   ]);
 
   if (!isOpen) return null;

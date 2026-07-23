@@ -274,12 +274,14 @@ async fn export_video(
     audio_bitrate: Option<String>,
     audio_format: Option<String>,
     segments: Option<Vec<ClipSegment>>,
+    is_flipped: Option<bool>,
 ) -> Result<String, String> {
     let ffmpeg = get_ffmpeg_path(&app_handle);
     let speed = export_speed.unwrap_or(1.0);
     let is_speed_changed = (speed - 1.0).abs() > 0.01;
     let muted = is_muted.unwrap_or(false);
     let exp_type = export_type.unwrap_or_else(|| "video".to_string());
+    let flip_filter_str = if is_flipped.unwrap_or(false) { "hflip," } else { "" };
 
     let active_segments = match segments {
         Some(ref segs) if !segs.is_empty() => segs.clone(),
@@ -310,9 +312,9 @@ async fn export_video(
         let scale_filter = format!("scale='trunc(iw*{:.4}/2)*2':'trunc(ih*{:.4}/2)*2'", scale_ratio, scale_ratio);
 
         let crop_filter_str = if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
-            format!("crop={}:{}:{}:{},", w, h, x, y)
+            format!("{}crop={}:{}:{}:{},", flip_filter_str, w, h, x, y)
         } else {
-            "".to_string()
+            flip_filter_str.to_string()
         };
 
         let pts_filter_str = if is_speed_changed {
@@ -626,6 +628,9 @@ async fn export_video(
                 }
 
                 let mut vf_filters = Vec::new();
+                if is_flipped.unwrap_or(false) {
+                    vf_filters.push("hflip".to_string());
+                }
                 if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
                     vf_filters.push(format!("crop={}:{}:{}:{}", w, h, x, y));
                 }
