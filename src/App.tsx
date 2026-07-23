@@ -1731,9 +1731,9 @@ function App() {
         </div>
       )}
 
-      {/* 메인 콘텐츠 영역 (편집 모드 시 비디오가 컨트롤 바 위 공간에 100% 가림 없이 들어가도록 스케일 축소) */}
+      {/* 메인 콘텐츠 영역 (편집 모드 시 비디오가 컨트롤 바 위 공간에 100% 여유 마진을 두고 가림 없이 축소) */}
       <div className={`relative flex-1 flex items-center justify-center overflow-hidden z-10 transition-all duration-300 ${
-        isEditMode ? "pb-[115px]" : ""
+        isEditMode ? "pb-[165px]" : ""
       }`}>
         {videoSrc ? (
           <div ref={mediaContainerRef} className="relative w-full h-full flex items-center justify-center overflow-hidden">
