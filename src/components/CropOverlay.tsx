@@ -27,20 +27,53 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
 
   const { width: containerWidth, height: containerHeight } = videoRect;
 
-  // 회전 및 반전 각도에 따른 화면 마우스 벡터 -> 로컬 트랜스폼 좌표 변환 헬퍼
+  // 회전 및 반전 각도에 따른 화면 마우스 벡터 -> 로컬 트랜스폼 좌표 변환 헬퍼 (Inverse Rotation Vector)
   const getLocalMouseDelta = (screenDx: number, screenDy: number) => {
-    const rad = -((rotation || 0) * Math.PI) / 180;
-    const cos = Math.cos(rad);
-    const sin = Math.sin(rad);
+    let localDx = screenDx;
+    let localDy = screenDy;
 
-    let localDx = screenDx * cos - screenDy * sin;
-    let localDy = screenDx * sin + screenDy * cos;
+    if (rotation === 90) {
+      localDx = screenDy;
+      localDy = -screenDx;
+    } else if (rotation === 180) {
+      localDx = -screenDx;
+      localDy = -screenDy;
+    } else if (rotation === 270) {
+      localDx = -screenDy;
+      localDy = screenDx;
+    }
 
     if (flipH) {
       localDx = -localDx;
     }
 
     return { dx: localDx, dy: localDy };
+  };
+
+  // 회전 각도(rotation)에 따른 화면 기준 커서(Cursor) 방향 동적 매핑 헬퍼
+  const getRotatedCursor = (handle: string) => {
+    const isRotated90or270 = rotation === 90 || rotation === 270;
+
+    switch (handle) {
+      case "t":
+      case "b":
+        return isRotated90or270 ? "ew-resize" : "ns-resize";
+
+      case "l":
+      case "r":
+        return isRotated90or270 ? "ns-resize" : "ew-resize";
+
+      case "tl":
+      case "br":
+        return isRotated90or270 ? "nesw-resize" : "nwse-resize";
+
+      case "tr":
+      case "bl":
+        return isRotated90or270 ? "nwse-resize" : "nesw-resize";
+
+      default:
+        return "move";
+    }
   };
 
   // 비율 값 수치 변환
@@ -58,7 +91,12 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
   React.useEffect(() => {
     if (aspectRatio === "free") return;
 
-    const snapVal = aspectRatio === "1:1" ? 1.0 : aspectRatio === "16:9" ? 16 / 9 : aspectRatio === "4:3" ? 4 / 3 : 9 / 16;
+    const isRotated90 = rotation === 90 || rotation === 270;
+    let snapVal = aspectRatio === "1:1" ? 1.0 : aspectRatio === "16:9" ? 16 / 9 : aspectRatio === "4:3" ? 4 / 3 : 9 / 16;
+    if (isRotated90) {
+      snapVal = 1 / snapVal;
+    }
+
     const pixelRatio = containerWidth / containerHeight;
     const targetWHRatio = snapVal / pixelRatio;
 
@@ -88,7 +126,7 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
     if (nextY + nextH > 1) nextY = 1 - nextH;
 
     onChange({ x: nextX, y: nextY, w: nextW, h: nextH });
-  }, [aspectRatio, containerWidth, containerHeight]);
+  }, [aspectRatio, containerWidth, containerHeight, rotation]);
 
   // 1. 크롭박스 전체 드래그 이동 처리
   const handleBoxDragStart = (e: React.MouseEvent) => {
@@ -164,9 +202,12 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
       }
 
       // [종횡비 제한 보정]
-      if (ratioVal) {
+      const isRotated90 = rotation === 90 || rotation === 270;
+      const effectiveRatioVal = (ratioVal && isRotated90) ? (1 / ratioVal) : ratioVal;
+
+      if (effectiveRatioVal) {
         const pixelRatio = containerWidth / containerHeight;
-        const targetWHRatio = ratioVal / pixelRatio;
+        const targetWHRatio = effectiveRatioVal / pixelRatio;
 
         if (handle === "r" || handle === "l" || handle === "br" || handle === "bl") {
           // 가로폭 수정에 따라 높이 비율 제한
@@ -189,9 +230,9 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
       
       if (nextLeft + nextWidth > 1) {
         nextWidth = 1 - nextLeft;
-        if (ratioVal) {
+        if (effectiveRatioVal) {
           const pixelRatio = containerWidth / containerHeight;
-          nextHeight = nextWidth / (ratioVal / pixelRatio);
+          nextHeight = nextWidth / (effectiveRatioVal / pixelRatio);
           if (handle.includes("t")) {
             nextTop = startTop + startHeight - nextHeight;
           }
@@ -200,16 +241,21 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
 
       if (nextTop + nextHeight > 1) {
         nextHeight = 1 - nextTop;
-        if (ratioVal) {
+        if (effectiveRatioVal) {
           const pixelRatio = containerWidth / containerHeight;
-          nextWidth = nextHeight * (ratioVal / pixelRatio);
+          nextWidth = nextHeight * (effectiveRatioVal / pixelRatio);
           if (handle.includes("l")) {
             nextLeft = startLeft + startWidth - nextWidth;
           }
         }
       }
 
-      onChange({ x: nextLeft, y: nextTop, w: nextWidth, h: nextHeight });
+      onChange({
+        x: nextLeft,
+        y: nextTop,
+        w: nextWidth,
+        h: nextHeight
+      });
     };
 
     const handleMouseUp = () => {
@@ -271,40 +317,48 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
           <div></div>
         </div>
 
-        {/* 4. 리사이즈 핸들 조절점 */}
+        {/* 4. 리사이즈 핸들 조절점 (동적 커서 매핑 적용) */}
         {/* 모서리 핸들 (Corners) */}
         <div
-          className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-white border border-indigo-500 rounded-sm cursor-nwse-resize z-10"
+          className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-white border border-indigo-500 rounded-sm z-10"
+          style={{ cursor: getRotatedCursor("tl") }}
           onMouseDown={(e) => handleResizeStart("tl", e)}
         />
         <div
-          className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-white border border-indigo-500 rounded-sm cursor-nesw-resize z-10"
+          className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-white border border-indigo-500 rounded-sm z-10"
+          style={{ cursor: getRotatedCursor("tr") }}
           onMouseDown={(e) => handleResizeStart("tr", e)}
         />
         <div
-          className="absolute -bottom-1 -left-1 w-2.5 h-2.5 bg-white border border-indigo-500 rounded-sm cursor-nesw-resize z-10"
+          className="absolute -bottom-1 -left-1 w-2.5 h-2.5 bg-white border border-indigo-500 rounded-sm z-10"
+          style={{ cursor: getRotatedCursor("bl") }}
           onMouseDown={(e) => handleResizeStart("bl", e)}
         />
         <div
-          className="absolute -bottom-1 -right-1 w-2.5 h-2.5 bg-white border border-indigo-500 rounded-sm cursor-nwse-resize z-10"
+          className="absolute -bottom-1 -right-1 w-2.5 h-2.5 bg-white border border-indigo-500 rounded-sm z-10"
+          style={{ cursor: getRotatedCursor("br") }}
           onMouseDown={(e) => handleResizeStart("br", e)}
         />
 
         {/* 경계선 핸들 (Edges) */}
         <div
-          className="absolute -top-1 left-1/2 -translate-x-1/2 w-4 h-1.5 bg-white border border-indigo-500 rounded-full cursor-ns-resize z-10"
+          className="absolute -top-1 left-1/2 -translate-x-1/2 w-4 h-1.5 bg-white border border-indigo-500 rounded-full z-10"
+          style={{ cursor: getRotatedCursor("t") }}
           onMouseDown={(e) => handleResizeStart("t", e)}
         />
         <div
-          className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-1.5 bg-white border border-indigo-500 rounded-full cursor-ns-resize z-10"
+          className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-1.5 bg-white border border-indigo-500 rounded-full z-10"
+          style={{ cursor: getRotatedCursor("b") }}
           onMouseDown={(e) => handleResizeStart("b", e)}
         />
         <div
-          className="absolute top-1/2 -left-1 -translate-y-1/2 w-1.5 h-4 bg-white border border-indigo-500 rounded-full cursor-ew-resize z-10"
+          className="absolute top-1/2 -left-1 -translate-y-1/2 w-1.5 h-4 bg-white border border-indigo-500 rounded-full z-10"
+          style={{ cursor: getRotatedCursor("l") }}
           onMouseDown={(e) => handleResizeStart("l", e)}
         />
         <div
-          className="absolute top-1/2 -right-1 -translate-y-1/2 w-1.5 h-4 bg-white border border-indigo-500 rounded-full cursor-ew-resize z-10"
+          className="absolute top-1/2 -right-1 -translate-y-1/2 w-1.5 h-4 bg-white border border-indigo-500 rounded-full z-10"
+          style={{ cursor: getRotatedCursor("r") }}
           onMouseDown={(e) => handleResizeStart("r", e)}
         />
       </div>
