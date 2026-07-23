@@ -2088,6 +2088,7 @@ function App() {
         onTrimChange={() => {}}
         onSaveClick={handleSaveClick}
         isCropMode={isCropMode}
+        isCropApplied={isCropApplied}
         onToggleCrop={() => {
           setIsCropMode((prev) => {
             const next = !prev;

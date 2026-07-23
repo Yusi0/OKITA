@@ -43,6 +43,7 @@ interface ControlBarProps {
   onTrimChange: (start: number, end: number) => void;
   onSaveClick: () => void;
   isCropMode: boolean;
+  isCropApplied?: boolean;
   onToggleCrop: () => void;
   onCaptureFrame?: () => void;
   isImage?: boolean;
@@ -93,6 +94,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onTrimChange: _onTrimChange,
   onSaveClick,
   isCropMode,
+  isCropApplied = false,
   onToggleCrop,
   onCaptureFrame: _onCaptureFrame,
   isImage = false,
@@ -424,19 +426,31 @@ export const ControlBar: React.FC<ControlBarProps> = ({
             </button>
 
             {/* Crop Button */}
-            {isEditMode && !isImage && (
+            {isEditMode && (
               <button
                 onClick={(e) => {
                   onToggleCrop();
                   (e.currentTarget as HTMLButtonElement).blur();
                 }}
-                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${isCropMode
-                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40"
+                className={`relative flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${isCropMode
+                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40 shadow-sm shadow-indigo-500/20"
+                    : isCropApplied
+                    ? "text-emerald-400 bg-emerald-500/15 border-emerald-500/30 shadow-sm"
                     : "text-white/90 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
                   }`}
-                title={isCropMode ? TOOLTIPS.controlBar.cropModeDisable : TOOLTIPS.controlBar.cropModeEnable}
+                title={
+                  isCropMode
+                    ? "크롭 편집 모드 끄기 (취소)"
+                    : isCropApplied
+                    ? "크롭 적용됨 (클릭하여 재수정 / 취소)"
+                    : TOOLTIPS.controlBar.cropModeEnable
+                }
               >
                 <Crop className="w-4.5 h-4.5" />
+                {/* 크롭 적용 상태 녹색 뱃지 인디케이터 Dot */}
+                {isCropApplied && !isCropMode && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-neutral-900 shadow-sm animate-pulse" />
+                )}
               </button>
             )}
           </div>
