@@ -43,7 +43,6 @@ interface ControlBarProps {
   onTrimChange: (start: number, end: number) => void;
   onSaveClick: () => void;
   isCropMode: boolean;
-  isCropApplied?: boolean;
   onToggleCrop: () => void;
   onCaptureFrame?: () => void;
   isImage?: boolean;
@@ -57,12 +56,6 @@ interface ControlBarProps {
   onSelectClip?: (id: string) => void;
   dropInsertIndex?: number | null;
   isDraggingAsset?: boolean;
-  rotation?: number;
-  flipH?: boolean;
-  flipV?: boolean;
-  onRotate?: () => void;
-  onFlipH?: () => void;
-  onFlipV?: () => void;
 }
 
 const formatTime = (seconds: number) => {
@@ -94,7 +87,6 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onTrimChange: _onTrimChange,
   onSaveClick,
   isCropMode,
-  isCropApplied = false,
   onToggleCrop,
   onCaptureFrame: _onCaptureFrame,
   isImage = false,
@@ -107,13 +99,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   selectedClipId,
   onSelectClip,
   dropInsertIndex,
-  isDraggingAsset,
-  rotation: _rotation = 0,
-  flipH: _flipH = false,
-  flipV: _flipV = false,
-  onRotate: _onRotate,
-  onFlipH: _onFlipH,
-  onFlipV: _onFlipV
+  isDraggingAsset
 }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -426,31 +412,19 @@ export const ControlBar: React.FC<ControlBarProps> = ({
             </button>
 
             {/* Crop Button */}
-            {isEditMode && (
+            {isEditMode && !isImage && (
               <button
                 onClick={(e) => {
                   onToggleCrop();
                   (e.currentTarget as HTMLButtonElement).blur();
                 }}
-                className={`relative flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${isCropMode
-                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40 shadow-sm shadow-indigo-500/20"
-                    : isCropApplied
-                    ? "text-emerald-400 bg-emerald-500/15 border-emerald-500/30 shadow-sm"
+                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${isCropMode
+                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40"
                     : "text-white/90 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
                   }`}
-                title={
-                  isCropMode
-                    ? "크롭 편집 모드 끄기 (취소)"
-                    : isCropApplied
-                    ? "크롭 적용됨 (클릭하여 재수정 / 취소)"
-                    : TOOLTIPS.controlBar.cropModeEnable
-                }
+                title={isCropMode ? TOOLTIPS.controlBar.cropModeDisable : TOOLTIPS.controlBar.cropModeEnable}
               >
                 <Crop className="w-4.5 h-4.5" />
-                {/* 크롭 적용 상태 녹색 뱃지 인디케이터 Dot */}
-                {isCropApplied && !isCropMode && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-neutral-900 shadow-sm animate-pulse" />
-                )}
               </button>
             )}
           </div>
@@ -477,9 +451,9 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   onSaveClick();
                   (e.currentTarget as HTMLButtonElement).blur();
                 }}
-                disabled={!hasVideo || isCropMode}
+                disabled={!hasVideo}
                 className="flex items-center justify-center w-11 h-11 rounded-full text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition-all duration-150 hover:scale-105 active:scale-95 disabled:bg-white/5 disabled:text-white/30 disabled:shadow-none disabled:scale-100 disabled:cursor-not-allowed cursor-pointer"
-                title={isCropMode ? "크롭 편집 중에는 완료를 먼저 눌러주세요" : TOOLTIPS.controlBar.exportModal}
+                title={TOOLTIPS.controlBar.exportModal}
               >
                 <Save className="w-5 h-5 stroke-white fill-none" />
               </button>

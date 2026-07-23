@@ -250,28 +250,6 @@ fn get_audio_codec(app_handle: &tauri::AppHandle, path: &str) -> Option<String> 
     None
 }
 
-fn get_orient_filter_str(rotation: Option<i32>, flip_h: Option<bool>, flip_v: Option<bool>) -> String {
-    let mut filters = Vec::new();
-    if flip_h.unwrap_or(false) {
-        filters.push("hflip".to_string());
-    }
-    if flip_v.unwrap_or(false) {
-        filters.push("vflip".to_string());
-    }
-    let rot = rotation.unwrap_or(0);
-    match rot {
-        90 => filters.push("transpose=1".to_string()),
-        180 => filters.push("transpose=1,transpose=1".to_string()),
-        270 => filters.push("transpose=2".to_string()),
-        _ => {}
-    }
-    if filters.is_empty() {
-        "".to_string()
-    } else {
-        format!("{},", filters.join(","))
-    }
-}
-
 // 동영상 트림, 크롭, 배속 및 움짤(GIF/WebP)/오디오(MP3/M4A/WAV) 내보내기 커맨드
 #[tauri::command]
 async fn export_video(
@@ -289,9 +267,6 @@ async fn export_video(
     crop_h: Option<u32>,
     export_speed: Option<f64>,
     is_muted: Option<bool>,
-    rotation: Option<i32>,
-    flip_h: Option<bool>,
-    flip_v: Option<bool>,
     export_type: Option<String>,
     gif_fps: Option<String>,
     gif_quality: Option<u32>,
@@ -305,7 +280,6 @@ async fn export_video(
     let is_speed_changed = (speed - 1.0).abs() > 0.01;
     let muted = is_muted.unwrap_or(false);
     let exp_type = export_type.unwrap_or_else(|| "video".to_string());
-    let orient_filter_str = get_orient_filter_str(rotation, flip_h, flip_v);
 
     let active_segments = match segments {
         Some(ref segs) if !segs.is_empty() => segs.clone(),
@@ -361,10 +335,10 @@ async fn export_video(
             if gif_f == "webp" {
                 cmd.arg("-vcodec").arg("libwebp");
                 cmd.arg("-loop").arg("0");
-                cmd.arg("-vf").arg(format!("{}{}{}fps={},{}", crop_filter_str, orient_filter_str, pts_filter_str, fps_val, scale_filter));
+                cmd.arg("-vf").arg(format!("{}{}fps={},{}", crop_filter_str, pts_filter_str, fps_val, scale_filter));
             } else {
                 // GIF: 고품질 palettegen / paletteuse 적용
-                let fc = format!("[0:v]{}{}{}fps={},{},split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse", crop_filter_str, orient_filter_str, pts_filter_str, fps_val, scale_filter);
+                let fc = format!("[0:v]{}{}fps={},{},split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse", crop_filter_str, pts_filter_str, fps_val, scale_filter);
                 cmd.arg("-filter_complex").arg(fc);
             }
         } else {
@@ -396,8 +370,8 @@ async fn export_video(
                 let duration = (seg.end - seg.start).max(0.1);
                 
                 filter_str.push_str(&format!(
-                    "[{}:v]trim=start={:.3}:duration={:.3},setpts=PTS-STARTPTS,{}{}scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2,setsar=1,{}null[v{}];",
-                    input_idx, seg.start, duration, crop_filter_str, orient_filter_str, target_w, target_h, target_w, target_h, pts_filter_str, idx
+                    "[{}:v]trim=start={:.3}:duration={:.3},setpts=PTS-STARTPTS,{}scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2,setsar=1,{}null[v{}];",
+                    input_idx, seg.start, duration, crop_filter_str, target_w, target_h, target_w, target_h, pts_filter_str, idx
                 ));
                 labels.push_str(&format!("[v{}]", idx));
             }
@@ -513,8 +487,7 @@ async fn export_video(
         }
     } else {
         // [일반 비디오 내보내기]
-        let is_orient_changed = rotation.unwrap_or(0) != 0 || flip_h.unwrap_or(false) || flip_v.unwrap_or(false);
-        let actual_use_copy = use_copy && !is_speed_changed && !muted && !is_multi_segment && !is_orient_changed;
+        let actual_use_copy = use_copy && !is_speed_changed && !muted && !is_multi_segment;
 
         if !is_multi_segment {
             let seg = &active_segments[0];
@@ -580,8 +553,8 @@ async fn export_video(
                     };
 
                     fc_parts.push(format!(
-                        "[{}:v]trim=start={}:end={},setpts=PTS-STARTPTS,{}{}scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2,setsar=1[v{}]",
-                        input_idx, start_s, end_s, crop_filter, orient_filter_str, target_w, target_h, target_w, target_h, i
+                        "[{}:v]trim=start={}:end={},setpts=PTS-STARTPTS,{}scale={}:{}:force_original_aspect_ratio=decrease,pad={}:{}:(ow-iw)/2:(oh-ih)/2,setsar=1[v{}]",
+                        input_idx, start_s, end_s, crop_filter, target_w, target_h, target_w, target_h, i
                     ));
 
                     if !muted {
@@ -655,19 +628,6 @@ async fn export_video(
                 let mut vf_filters = Vec::new();
                 if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
                     vf_filters.push(format!("crop={}:{}:{}:{}", w, h, x, y));
-                }
-                let rot = rotation.unwrap_or(0);
-                match rot {
-                    90 => vf_filters.push("transpose=1".to_string()),
-                    180 => vf_filters.push("transpose=1,transpose=1".to_string()),
-                    270 => vf_filters.push("transpose=2".to_string()),
-                    _ => {}
-                }
-                if flip_h.unwrap_or(false) {
-                    vf_filters.push("hflip".to_string());
-                }
-                if flip_v.unwrap_or(false) {
-                    vf_filters.push("vflip".to_string());
                 }
                 if is_speed_changed {
                     let pts_mult = 1.0 / speed;
@@ -777,9 +737,6 @@ async fn export_image(
     crop_y: Option<u32>,
     crop_w: Option<u32>,
     crop_h: Option<u32>,
-    rotation: Option<i32>,
-    flip_h: Option<bool>,
-    flip_v: Option<bool>,
 ) -> Result<String, String> {
     let ffmpeg = get_ffmpeg_path(&app_handle);
     let mut cmd = Command::new(&ffmpeg);
@@ -789,25 +746,8 @@ async fn export_image(
     cmd.arg("-y");
     cmd.arg("-i").arg(&input_path);
     
-    let mut vf_filters = Vec::new();
     if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
-        vf_filters.push(format!("crop={}:{}:{}:{}", w, h, x, y));
-    }
-    if flip_h.unwrap_or(false) {
-        vf_filters.push("hflip".to_string());
-    }
-    if flip_v.unwrap_or(false) {
-        vf_filters.push("vflip".to_string());
-    }
-    let rot = rotation.unwrap_or(0);
-    match rot {
-        90 => vf_filters.push("transpose=1".to_string()),
-        180 => vf_filters.push("transpose=1,transpose=1".to_string()),
-        270 => vf_filters.push("transpose=2".to_string()),
-        _ => {}
-    }
-    if !vf_filters.is_empty() {
-        cmd.arg("-vf").arg(vf_filters.join(","));
+        cmd.arg("-vf").arg(format!("crop={}:{}:{}:{}", w, h, x, y));
     }
     
     cmd.arg(&output_path);

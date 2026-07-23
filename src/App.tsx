@@ -13,7 +13,7 @@ import { AudioVisualizer } from "./components/AudioVisualizer";
 import { AnimatedGifBadge } from "./components/AnimatedGifBadge";
 import { ContextMenu } from "./components/ContextMenu";
 import { InfoModal } from "./components/InfoModal";
-import { Video, Film, Loader2, ChevronLeft, ChevronRight, RotateCw, FlipHorizontal, ChevronDown, Check } from "lucide-react";
+import { Video, Film, Loader2, ChevronLeft, ChevronRight, FlipHorizontal } from "lucide-react";
 import "./App.css";
 
 const isNewerVersion = (current: string, latest: string) => {
@@ -50,27 +50,24 @@ function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
-  // 크롭(Crop) 및 캡처 관련 상태 정의 (5단계 상태 머신 구현)
+  // 크롭(Crop) 및 캡처 관련 상태 정의
   const [isCropMode, setIsCropMode] = useState(false);
-  const [isCropApplied, setIsCropApplied] = useState(false);
-  const [appliedCropArea, setAppliedCropArea] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const [cropArea, setCropArea] = useState<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 1, h: 1 });
+  const [cropArea, setCropArea] = useState<{ x: number; y: number; w: number; h: number }>({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
   const [cropAspectRatio, setCropAspectRatio] = useState<string>("free");
   const [videoRect, setVideoRect] = useState<DOMRect | null>(null);
-  const [isRatioDropdownOpen, setIsRatioDropdownOpen] = useState<boolean>(false);
 
-  // 시청 배속 및 음소거 상태 정의
+  // 시청 배속 상태 정의 (기본 1.0배속)
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  // 편집 음소거 상태 정의 (기본 false)
   const [isEditMuted, setIsEditMuted] = useState<boolean>(false);
 
-  // 미디어 회전 (0, 90, 180, 270) 및 반전 (flipH, flipV) 상태 정의
-  const [rotation, setRotation] = useState<number>(0);
-  const [flipH, setFlipH] = useState<boolean>(false);
-  const [flipV, setFlipV] = useState<boolean>(false);
+  // 수평 반전 상태 (임시 반전 모드)
+  const [isFlipped, setIsFlipped] = useState<boolean>(false);
 
-  const handleRotate = () => setRotation((prev) => (prev + 90) % 360);
-  const handleFlipH = () => setFlipH((prev) => !prev);
-  const handleFlipV = () => setFlipV((prev) => !prev);
+  // 편집 모드 전환 또는 영상 소스 변경 시 수평 반전 상태 자동 리셋
+  useEffect(() => {
+    setIsFlipped(false);
+  }, [isEditMode, videoSrc]);
 
   // v0.2.0 멀티 클립 타임라인 관련 상태 및 동기식 useRef 히스토리 스택 정의
   const [clips, setClips] = useState<ClipSegment[]>([]);
@@ -200,7 +197,6 @@ function App() {
   };
 
   const imageRef = useRef<HTMLImageElement>(null);
-  const mediaContainerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<number | null>(null);
 
   // 플레이리스트 (같은 폴더 미디어 목록) 관련 상태
@@ -216,72 +212,71 @@ function App() {
   const isImage = filePath ? /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(filePath) : false;
   const isAnimatedGif = filePath ? /\.(gif|webp)$/i.test(filePath) : false;
 
-  // 회전 각도 및 뷰포트 크기에 따른 회전 미디어 맞춤 크기 계산 헬퍼
-  const getMediaBoxDimensions = () => {
-    if (!mediaContainerRef.current) return null;
-    const containerW = mediaContainerRef.current.clientWidth;
-    const containerH = mediaContainerRef.current.clientHeight;
-
-    let nativeW = 0;
-    let nativeH = 0;
-
+  // 실제 렌더링된 미디어 사각형 영역 계산 (레터박스/필러박스 제외, 비디오 및 이미지 통합 지원)
+  const calculateMediaRenderRect = () => {
     if (isImage) {
-      if (imageRef.current) {
-        nativeW = imageRef.current.naturalWidth;
-        nativeH = imageRef.current.naturalHeight;
+      if (!imageRef.current) return null;
+      const img = imageRef.current;
+      const rect = img.getBoundingClientRect();
+      if (img.naturalWidth === 0) return null;
+      
+      const imgRatio = img.naturalWidth / img.naturalHeight;
+      const elementRatio = rect.width / rect.height;
+      
+      let renderWidth = rect.width;
+      let renderHeight = rect.height;
+      let renderLeft = rect.left;
+      let renderTop = rect.top;
+      
+      if (elementRatio > imgRatio) {
+        renderWidth = rect.height * imgRatio;
+        renderLeft = rect.left + (rect.width - renderWidth) / 2;
+      } else {
+        renderHeight = rect.width / imgRatio;
+        renderTop = rect.top + (rect.height - renderHeight) / 2;
       }
+      
+      return {
+        x: renderLeft - rect.left,
+        y: renderTop - rect.top,
+        left: renderLeft,
+        top: renderTop,
+        width: renderWidth,
+        height: renderHeight
+      } as DOMRect;
     } else {
       const video = getActiveVideo();
-      if (video) {
-        nativeW = video.videoWidth;
-        nativeH = video.videoHeight;
+      if (!video) return null;
+      const rect = video.getBoundingClientRect();
+      if (video.videoWidth === 0) return null;
+      
+      const videoRatio = video.videoWidth / video.videoHeight;
+      const elementRatio = rect.width / rect.height;
+      
+      let renderWidth = rect.width;
+      let renderHeight = rect.height;
+      let renderLeft = rect.left;
+      let renderTop = rect.top;
+      
+      if (elementRatio > videoRatio) {
+        // Pillarbox (가로 검은 여백)
+        renderWidth = rect.height * videoRatio;
+        renderLeft = rect.left + (rect.width - renderWidth) / 2;
+      } else {
+        // Letterbox (세로 검은 여백)
+        renderHeight = rect.width / videoRatio;
+        renderTop = rect.top + (rect.height - renderHeight) / 2;
       }
+      
+      return {
+        x: renderLeft - rect.left,
+        y: renderTop - rect.top,
+        left: renderLeft,
+        top: renderTop,
+        width: renderWidth,
+        height: renderHeight
+      } as DOMRect;
     }
-
-    if (!nativeW || !nativeH || !containerW || !containerH) return null;
-
-    const isRotated90 = rotation === 90 || rotation === 270;
-    const nativeRatio = nativeW / nativeH;
-
-    // 회전 각도에 따른 화면 기준 실효 종횡비
-    const effectiveRatio = isRotated90 ? (1 / nativeRatio) : nativeRatio;
-    const containerRatio = containerW / containerH;
-
-    let renderW = containerW;
-    let renderH = containerH;
-
-    if (containerRatio > effectiveRatio) {
-      renderW = containerH * effectiveRatio;
-      renderH = containerH;
-    } else {
-      renderW = containerW;
-      renderH = containerW / effectiveRatio;
-    }
-
-    // CSS rotate 적용 전 요소의 너비/높이 (90도/270도 회전 시 역발상 스왑으로 화면에 100% 맞춤)
-    const elemW = isRotated90 ? renderH : renderW;
-    const elemH = isRotated90 ? renderW : renderH;
-
-    return {
-      elemW,
-      elemH,
-      renderW,
-      renderH
-    };
-  };
-
-  // 실제 렌더링된 미디어 사각형 영역 계산 (부모 컨테이너 기준 렌더 사각형)
-  const calculateMediaRenderRect = () => {
-    const box = getMediaBoxDimensions();
-    if (!box) return null;
-    return {
-      x: 0,
-      y: 0,
-      left: 0,
-      top: 0,
-      width: box.elemW,
-      height: box.elemH
-    } as DOMRect;
   };
 
   const updateVideoRect = () => {
@@ -331,7 +326,7 @@ function App() {
     };
   }, [isCropMode, isImage, videoSrc]);
 
-  // 편집 모드 시 컨트롤 바 상시 고정화 및 메인 캔버스 300ms 트랜지션 크기 자동 보정
+  // 편집 모드 시 컨트롤 바 상시 고정화 처리
   useEffect(() => {
     if (isEditMode) {
       setIsControlsVisible(true);
@@ -339,16 +334,7 @@ function App() {
         window.clearTimeout(controlsTimeoutRef.current);
       }
     }
-    updateVideoRect();
-    const t1 = setTimeout(updateVideoRect, 50);
-    const t2 = setTimeout(updateVideoRect, 150);
-    const t3 = setTimeout(updateVideoRect, 320);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-    };
-  }, [isEditMode, rotation, flipH, flipV]);
+  }, [isEditMode]);
 
   // 바탕화면 및 탐색기 드래그 앤 드롭 파일 수신 로직 (편집 모드 시 프리미어 프로 스타일 타임라인 삽입)
   useEffect(() => {
@@ -479,8 +465,6 @@ function App() {
               setCurrentTime(0);
               setSmoothTime(0);
               setDuration(0);
-              setRotation(0);
-              setFlipH(false);
               setIsEditMode(false);
               setIsCropMode(false);
               setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
@@ -638,14 +622,6 @@ function App() {
     // 재생 상태가 변할 때마다 컨트롤바 표시 및 자동 숨김 타이머 작동
     handleMouseMove();
   }, [isPlaying, videoSrc]);
-
-  // 크롭 모드 및 회전/반전/비율 변경 시 미디어 레터박스 영역 비동기 재계산
-  useEffect(() => {
-    if (isCropMode) {
-      const timer = setTimeout(updateVideoRect, 60);
-      return () => clearTimeout(timer);
-    }
-  }, [isCropMode, rotation, flipH, cropAspectRatio]);
 
   const smoothTimeRef = useRef<number>(0);
 
@@ -1007,8 +983,6 @@ function App() {
         setCurrentTime(0);
         setSmoothTime(0);
         setDuration(0);
-        setRotation(0);
-        setFlipH(false);
         setIsEditMode(false); // 편집 모드 초기화
         setIsCropMode(false); // 크롭 모드 초기화
         setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
@@ -1059,8 +1033,6 @@ function App() {
     setCurrentTime(0);
     setSmoothTime(0);
     setDuration(0);
-    setRotation(0);
-    setFlipH(false);
     setIsEditMode(false);
     setIsCropMode(false);
     setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
@@ -1114,14 +1086,12 @@ function App() {
       let cropW: number | null = null;
       let cropH: number | null = null;
 
-      const targetCrop = isCropMode ? cropArea : (isCropApplied && appliedCropArea ? appliedCropArea : cropArea);
-      const isCropped = isCropApplied || (targetCrop.x > 0.001 || targetCrop.y > 0.001 || targetCrop.w < 0.999 || targetCrop.h < 0.999);
-      if (isCropped && imageRef.current) {
+      if (isCropMode && imageRef.current) {
         const img = imageRef.current;
-        cropX = Math.round(targetCrop.x * img.naturalWidth);
-        cropY = Math.round(targetCrop.y * img.naturalHeight);
-        cropW = Math.round(targetCrop.w * img.naturalWidth);
-        cropH = Math.round(targetCrop.h * img.naturalHeight);
+        cropX = Math.round(cropArea.x * img.naturalWidth);
+        cropY = Math.round(cropArea.y * img.naturalHeight);
+        cropW = Math.round(cropArea.w * img.naturalWidth);
+        cropH = Math.round(cropArea.h * img.naturalHeight);
       }
 
       await invoke("export_image", {
@@ -1131,9 +1101,6 @@ function App() {
         cropY,
         cropW,
         cropH,
-        rotation,
-        flipH,
-        flipV,
       });
 
       setToastMessage({
@@ -1154,11 +1121,6 @@ function App() {
   };
 
   const handleSaveClick = () => {
-    if (isCropMode) {
-      setToastMessage({ text: "크롭 편집 모드 중입니다. 상단 우측의 '완료' 버튼을 먼저 눌러주세요.", type: "error" });
-      setTimeout(() => setToastMessage(null), 3000);
-      return;
-    }
     if (isImage) {
       handleExportImage();
     } else {
@@ -1233,14 +1195,6 @@ function App() {
         case "KeyC":
           e.preventDefault();
           handleSplitClip();
-          break;
-        case "KeyR":
-          e.preventDefault();
-          handleRotate();
-          break;
-        case "KeyH":
-          e.preventDefault();
-          handleFlipH();
           break;
         case "KeyZ":
           if (e.ctrlKey || e.metaKey) {
@@ -1396,20 +1350,12 @@ function App() {
       if (!savePath) return;
 
       const canvas = document.createElement("canvas");
-      const isRotated90 = rotation === 90 || rotation === 270;
-      const canvasW = isRotated90 ? video.videoHeight : video.videoWidth;
-      const canvasH = isRotated90 ? video.videoWidth : video.videoHeight;
-      canvas.width = canvasW;
-      canvas.height = canvasH;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas context를 생성할 수 없습니다.");
 
-      ctx.save();
-      ctx.translate(canvasW / 2, canvasH / 2);
-      ctx.rotate((rotation * Math.PI) / 180);
-      ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
-      ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, -video.videoWidth / 2, -video.videoHeight / 2, video.videoWidth, video.videoHeight);
-      ctx.restore();
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       canvas.toBlob(async (blob) => {
         if (!blob) {
@@ -1507,26 +1453,12 @@ function App() {
       let cropW: number | null = null;
       let cropH: number | null = null;
 
-      const targetCrop = isCropMode ? cropArea : (isCropApplied && appliedCropArea ? appliedCropArea : cropArea);
-      const isCropped = isCropApplied || (targetCrop.x > 0.001 || targetCrop.y > 0.001 || targetCrop.w < 0.999 || targetCrop.h < 0.999);
-      let nativeW = 0;
-      let nativeH = 0;
-      if (isImage && imageRef.current) {
-        nativeW = imageRef.current.naturalWidth;
-        nativeH = imageRef.current.naturalHeight;
-      } else {
-        const video = getActiveVideo();
-        if (video) {
-          nativeW = video.videoWidth;
-          nativeH = video.videoHeight;
-        }
-      }
-
-      if (isCropped && nativeW > 0 && nativeH > 0) {
-        cropX = Math.round(targetCrop.x * nativeW);
-        cropY = Math.round(targetCrop.y * nativeH);
-        cropW = Math.round(targetCrop.w * nativeW);
-        cropH = Math.round(targetCrop.h * nativeH);
+      const video = getActiveVideo();
+      if (isCropMode && video) {
+        cropX = Math.round(cropArea.x * video.videoWidth);
+        cropY = Math.round(cropArea.y * video.videoHeight);
+        cropW = Math.round(cropArea.w * video.videoWidth);
+        cropH = Math.round(cropArea.h * video.videoHeight);
       }
 
       await invoke("export_video", {
@@ -1543,9 +1475,6 @@ function App() {
         cropH,
         exportSpeed,
         isMuted: isEditMuted,
-        rotation,
-        flipH,
-        flipV,
         exportType,
         gifFps,
         gifQuality,
@@ -1604,9 +1533,7 @@ function App() {
     setTrimStart(0);
     setTrimEnd(duration);
     setIsCropMode(false);
-    setIsCropApplied(false);
-    setAppliedCropArea(null);
-    setCropArea({ x: 0, y: 0, w: 1, h: 1 });
+    setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
     setCropAspectRatio("free");
 
     setIsEditMode((prev) => {
@@ -1740,8 +1667,6 @@ function App() {
         </div>
       )}
 
-
-
       {/* 인앱 커스텀 토스트 알림 메시지 */}
       {toastMessage && (
         <div className="absolute top-12 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl bg-neutral-900/90 border border-white/10 shadow-2xl text-xs text-white flex items-center gap-2.5 animate-fade-in z-50">
@@ -1754,111 +1679,29 @@ function App() {
         </div>
       )}
 
-      {/* 메인 콘텐츠 영역 (편집 모드 시 비디오가 컨트롤 바 위 공간에 100% 여유 마진을 두고 가림 없이 축소) */}
+      {/* 메인 콘텐츠 영역 (편집 모드 시 비디오가 컨트롤 바 위로 축소되도록 바인딩) */}
       <div className={`relative flex-1 flex items-center justify-center overflow-hidden z-10 transition-all duration-300 ${
-        isEditMode ? "pb-[165px]" : ""
+        isEditMode ? "pb-[130px]" : ""
       }`}>
         {videoSrc ? (
-          <div ref={mediaContainerRef} className="relative w-full h-full flex items-center justify-center overflow-hidden">
-            {/* 크롭 모드 전용 우상단 플로팅 툴바 (iOS 스타일 glassmorphism floating pill) */}
-            {isCropMode && (
-              <div className="absolute top-4 right-4 z-50 flex items-center gap-2 p-1.5 px-2.5 rounded-2xl bg-neutral-900/90 border border-white/10 shadow-2xl backdrop-blur-2xl text-xs text-white/90 animate-[fadeIn_0.2s_ease-out]">
-                {/* 90도 회전 버튼 (아이콘 전용) */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleRotate();
-                    setTimeout(updateVideoRect, 50);
-                  }}
-                  title="90도 시계방향 회전 (R)"
-                  className="flex items-center justify-center p-2 rounded-xl bg-white/5 hover:bg-white/15 active:bg-white/10 border border-white/10 text-indigo-400 transition-all cursor-pointer"
-                >
-                  <RotateCw className="w-4 h-4" />
-                </button>
-
-                {/* 좌우 반전 버튼 (아이콘 전용) */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleFlipH();
-                    setTimeout(updateVideoRect, 50);
-                  }}
-                  title="좌우 거울 반전 (H)"
-                  className={`flex items-center justify-center p-2 rounded-xl border transition-all cursor-pointer ${
-                    flipH
-                      ? "bg-indigo-600/80 border-indigo-500 text-white font-semibold shadow-md shadow-indigo-600/30"
-                      : "bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/10 text-white/90"
-                  }`}
-                >
-                  <FlipHorizontal className="w-4 h-4" />
-                </button>
-
-                <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
-
-                {/* 비율 선택 커스텀 드롭다운 */}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setIsRatioDropdownOpen((prev) => !prev)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/15 active:bg-white/10 border border-white/10 text-xs font-medium text-white/90 transition-all cursor-pointer"
-                  >
-                    <span className="text-white/40 font-normal">비율:</span>
-                    <span className="font-semibold text-white">
-                      {cropAspectRatio === "free" ? "자유" : cropAspectRatio}
-                    </span>
-                    <ChevronDown className={`w-3.5 h-3.5 text-white/60 transition-transform duration-200 ${isRatioDropdownOpen ? "rotate-180" : ""}`} />
-                  </button>
-
-                  {isRatioDropdownOpen && (
-                    <div className="absolute right-0 top-full mt-1.5 w-36 p-1.5 rounded-2xl bg-neutral-900/95 border border-white/10 shadow-2xl backdrop-blur-2xl text-xs flex flex-col gap-0.5 animate-in fade-in zoom-in-95 duration-100 z-50">
-                      {[
-                        { id: "free", label: "자유 비율" },
-                        { id: "1:1", label: "1:1 (정사각형)" },
-                        { id: "16:9", label: "16:9 (와이드)" },
-                        { id: "4:3", label: "4:3 (표준)" },
-                        { id: "9:16", label: "9:16 (세로 숏폼)" },
-                      ].map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => {
-                            setCropAspectRatio(item.id);
-                            setIsRatioDropdownOpen(false);
-                            setTimeout(updateVideoRect, 50);
-                          }}
-                          className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
-                            cropAspectRatio === item.id
-                              ? "bg-indigo-600/80 text-white font-semibold"
-                              : "text-white/80 hover:bg-white/10 hover:text-white"
-                          }`}
-                        >
-                          <span>{item.label}</span>
-                          {cropAspectRatio === item.id && <Check className="w-3.5 h-3.5 text-white" />}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
-
-                {/* 완료 버튼 (Step 3.2: 현재 cropArea를 appliedCropArea로 최종 확정) */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsCropMode(false);
-                    setIsCropApplied(true);
-                    setAppliedCropArea({ ...cropArea });
-                  }}
-                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-xs font-semibold text-white shadow-lg shadow-emerald-600/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
-                >
-                  완료
-                </button>
-              </div>
-            )}
-
+          <div className="relative w-full h-full flex items-center justify-center bg-black/10">
             {/* 움짤 배지 */}
             <AnimatedGifBadge isAnimatedGif={isAnimatedGif} filePath={filePath} />
+
+            {/* 편집 모드 전용 우상단 수평반전(Flip Horizontal) 버튼 */}
+            {isEditMode && (
+              <button
+                onClick={() => setIsFlipped((prev) => !prev)}
+                className={`absolute top-4 right-4 z-30 w-9 h-9 rounded-xl border backdrop-blur-md flex items-center justify-center transition-all duration-200 shadow-xl cursor-pointer hover:scale-105 active:scale-95 ${
+                  isFlipped
+                    ? "text-indigo-400 bg-indigo-600/30 border-indigo-500/50 shadow-indigo-600/20"
+                    : "text-white/80 bg-neutral-900/80 border-white/10 hover:text-white hover:bg-neutral-800/90"
+                }`}
+                title="수평 반전"
+              >
+                <FlipHorizontal className="w-4.5 h-4.5" />
+              </button>
+            )}
 
             {/* 오디오 비주얼라이저 오버레이 */}
             <AudioVisualizer
@@ -1867,40 +1710,26 @@ function App() {
               filePath={filePath}
               fileName={fileName || ""}
             />
-            {/* 미디어 렌더러 (비디오 vs 이미지 통합 래퍼 컨테이너 - 회전 크기 자동 맞춤 및 크롭오버레이 1:1 공유) */}
-            {(() => {
-              const box = getMediaBoxDimensions();
-              const activeCrop = isCropMode ? cropArea : (isCropApplied && appliedCropArea ? appliedCropArea : cropArea);
-              const isCropped = isCropApplied || (activeCrop.x > 0.001 || activeCrop.y > 0.001 || activeCrop.w < 0.999 || activeCrop.h < 0.999);
-
-              let cropClipStyle: string | undefined = undefined;
-              let cropTransformStyle: string | undefined = undefined;
-
-              // 크롭 미리보기는 오직 '편집 모드(isEditMode)' 내에서 완료('!isCropMode')되었을 때만 적용 (재생 모드에서는 원본 영상 유지)
-              if (isEditMode && isCropped && !isCropMode) {
-                // 1. 크롭 바깥 영역 마스킹
-                cropClipStyle = `inset(${activeCrop.y * 100}% ${(1 - activeCrop.x - activeCrop.w) * 100}% ${(1 - activeCrop.y - activeCrop.h) * 100}% ${activeCrop.x * 100}%)`;
-
-                // 2. 크롭 구역 중앙 정렬(Center Alignment) 및 확대 (Zoom Expand) 스케일 계산
-                const cx = activeCrop.x + activeCrop.w / 2;
-                const cy = activeCrop.y + activeCrop.h / 2;
-                const scale = 1 / Math.max(activeCrop.w, activeCrop.h);
-
-                const transX = scale * (0.5 - cx) * 100;
-                const transY = scale * (0.5 - cy) * 100;
-
-                cropTransformStyle = `translate(${transX}%, ${transY}%) scale(${scale})`;
-              }
-
-              return (
-                /* Layer 1: 회전 전용 레이어 (시계 방향 +90/+180/+270도 정방향 회전) */
-                <div
-                  className="relative flex items-center justify-center cursor-default shrink-0 transition-all duration-200"
-                  style={{
-                    width: box ? `${box.elemW}px` : "100%",
-                    height: box ? `${box.elemH}px` : "100%",
-                    transform: `rotate(${rotation}deg)`,
+            {/* 미디어 렌더러 (비디오 vs 이미지 분기 & 수평 반전 트랜스폼 반영) */}
+            <div
+              className="w-full h-full flex items-center justify-center"
+              style={{
+                transform: isFlipped ? "scaleX(-1)" : "none",
+                transition: "transform 0.2s ease-in-out"
+              }}
+            >
+              {isImage ? (
+                <img
+                  ref={imageRef}
+                  src={videoSrc}
+                  onLoad={() => {
+                    if (isCropMode) updateVideoRect();
                   }}
+                  className="w-full h-full object-contain pointer-events-none"
+                />
+              ) : (
+                <div
+                  className="relative w-full h-full flex items-center justify-center cursor-default"
                   onMouseDown={handleVideoMouseDown}
                   onMouseUp={handleVideoMouseUp}
                   onMouseLeave={handleVideoMouseLeave}
@@ -1908,102 +1737,43 @@ function App() {
                   onTouchEnd={handleVideoTouchEnd}
                   onTouchCancel={handleVideoTouchCancel}
                 >
-                  {/* Layer 2: 반전 전용 레이어 (독립적 좌우/상하 반전) */}
-                  <div
-                    className="relative w-full h-full flex items-center justify-center transition-transform duration-200"
-                    style={{
-                      transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+                  <video
+                    ref={videoRefA}
+                    src={videoSrc}
+                    onTimeUpdate={handleTimeUpdate}
+                    onLoadedMetadata={handleLoadedMetadata}
+                    onDurationChange={handleDurationChange}
+                    onEnded={handleVideoEnded}
+                    onPlay={() => setIsPlaying(true)}
+                    onPause={() => {
+                      if (!isJumpingRef.current && activePlayer === "A") {
+                        setIsPlaying(false);
+                      }
                     }}
-                  >
-                    {/* Layer 3: 크롭 마스킹 레이어 (clipPath 분리 적용) */}
-                    <div
-                      className="relative w-full h-full flex items-center justify-center overflow-hidden"
-                      style={{
-                        clipPath: cropClipStyle,
-                        transition: "clip-path 0.25s ease-out",
-                      }}
-                    >
-                      {/* Layer 4: 실 미디어 엘리먼트 (크롭 중심점 확대/축소 스케일 적용) */}
-                      {isImage ? (
-                        <img
-                          ref={imageRef}
-                          src={videoSrc}
-                          onLoad={() => {
-                            updateVideoRect();
-                          }}
-                          style={{
-                            transform: cropTransformStyle,
-                            transformOrigin: "center",
-                            transition: "transform 0.25s ease-out",
-                          }}
-                          className="w-full h-full object-fill pointer-events-none"
-                        />
-                      ) : (
-                        <>
-                          <video
-                            ref={videoRefA}
-                            src={videoSrc}
-                            onTimeUpdate={handleTimeUpdate}
-                            onLoadedMetadata={handleLoadedMetadata}
-                            onDurationChange={handleDurationChange}
-                            onEnded={handleVideoEnded}
-                            onPlay={() => setIsPlaying(true)}
-                            onPause={() => {
-                              if (!isJumpingRef.current && activePlayer === "A") {
-                                setIsPlaying(false);
-                              }
-                            }}
-                            style={{
-                              transform: cropTransformStyle,
-                              transformOrigin: "center",
-                              transition: "transform 0.25s ease-out",
-                            }}
-                            className={`w-full h-full object-fill absolute inset-0 transition-opacity duration-75 ${
-                              activePlayer === "A" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
-                            }`}
-                          />
-                          <video
-                            ref={videoRefB}
-                            src={videoSrc}
-                            onTimeUpdate={handleTimeUpdate}
-                            onLoadedMetadata={handleLoadedMetadata}
-                            onDurationChange={handleDurationChange}
-                            onEnded={handleVideoEnded}
-                            onPlay={() => setIsPlaying(true)}
-                            onPause={() => {
-                              if (!isJumpingRef.current && activePlayer === "B") {
-                                setIsPlaying(false);
-                              }
-                            }}
-                            style={{
-                              transform: cropTransformStyle,
-                              transformOrigin: "center",
-                              transition: "transform 0.25s ease-out",
-                            }}
-                            className={`w-full h-full object-fill absolute inset-0 transition-opacity duration-75 ${
-                              activePlayer === "B" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
-                            }`}
-                          />
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* 크롭 조절 박스 레이어 - 미디어와 1:1 로컬 트랜스폼 공간 공유 */}
-                  {isCropMode && (
-                    <CropOverlay
-                      videoRect={box ? ({ x: 0, y: 0, left: 0, top: 0, width: box.elemW, height: box.elemH } as DOMRect) : videoRect}
-                      cropArea={cropArea}
-                      onChange={setCropArea}
-                      aspectRatio={cropAspectRatio}
-                      onAspectRatioChange={setCropAspectRatio}
-                      rotation={rotation}
-                      flipH={flipH}
-                    />
-                  )}
+                    className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
+                      activePlayer === "A" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
+                    }`}
+                  />
+                  <video
+                    ref={videoRefB}
+                    src={videoSrc}
+                    onTimeUpdate={handleTimeUpdate}
+                    onLoadedMetadata={handleLoadedMetadata}
+                    onDurationChange={handleDurationChange}
+                    onEnded={handleVideoEnded}
+                    onPlay={() => setIsPlaying(true)}
+                    onPause={() => {
+                      if (!isJumpingRef.current && activePlayer === "B") {
+                        setIsPlaying(false);
+                      }
+                    }}
+                    className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
+                      activePlayer === "B" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
+                    }`}
+                  />
                 </div>
-              );
-            })()}
+              )}
+            </div>
 
             {/* 왼쪽 이동 화살표 (Hover Chevron) */}
             {currentFileIndex > 0 && (
@@ -2027,6 +1797,17 @@ function App() {
                   <ChevronRight className="w-5 h-5" />
                 </div>
               </div>
+            )}
+
+            {/* 크롭 조절 박스 레이어 */}
+            {isCropMode && (
+              <CropOverlay
+                videoRect={videoRect}
+                cropArea={cropArea}
+                onChange={setCropArea}
+                aspectRatio={cropAspectRatio}
+                onAspectRatioChange={setCropAspectRatio}
+              />
             )}
           </div>
         ) : (
@@ -2078,9 +1859,6 @@ function App() {
         isAudioOnly={isAudio}
         cropArea={cropArea}
         clips={clips}
-        rotation={rotation}
-        flipH={flipH}
-        flipV={flipV}
       />
 
       {/* 플로팅 컨트롤 바 */}
@@ -2106,33 +1884,9 @@ function App() {
         onTrimChange={() => {}}
         onSaveClick={handleSaveClick}
         isCropMode={isCropMode}
-        isCropApplied={isCropApplied}
         onToggleCrop={() => {
-          setIsCropMode((prev) => {
-            const next = !prev;
-            if (!next) {
-              // Step 3.1 & Step 5: 크롭 버튼을 다시 누르는 경우 (취소 / 3.2 상태로 원복)
-              if (isCropApplied && appliedCropArea) {
-                // Step 5: 이전에 적용된 3.2 상태가 존재하면 3.2 크롭 상태로 원복 유지!
-                setCropArea({ ...appliedCropArea });
-              } else {
-                // Step 3.1: 이전에 적용된 크롭이 없었다면 1단계 원본 상태로 취소!
-                setIsCropApplied(false);
-                setCropArea({ x: 0, y: 0, w: 1, h: 1 });
-                setCropAspectRatio("free");
-              }
-            } else {
-              // Step 2 & Step 4: 크롭을 켜는 경우
-              if (isCropApplied && appliedCropArea) {
-                // Step 4: 이미 적용된 3.2 크롭 구역을 불러와 조정 상태로 진입
-                setCropArea({ ...appliedCropArea });
-              } else {
-                // Step 2: 최초 크롭 활성화 시 디폴트 80% 가이드 박스 제공
-                setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
-              }
-            }
-            return next;
-          });
+          setIsCropMode((prev) => !prev);
+          // 크롭 켤 때 크기 다시 구함
           setTimeout(updateVideoRect, 50);
         }}
         onCaptureFrame={handleCaptureFrame}
@@ -2147,12 +1901,6 @@ function App() {
         onSelectClip={(id) => setSelectedClipId(id)}
         dropInsertIndex={dropInsertIndex}
         isDraggingAsset={isDragOver}
-        rotation={rotation}
-        flipH={flipH}
-        flipV={flipV}
-        onRotate={handleRotate}
-        onFlipH={handleFlipH}
-        onFlipV={handleFlipV}
       />
 
       {/* 추출 진행 중 모달 오버레이 */}
@@ -2230,12 +1978,12 @@ function App() {
         isOpen={contextMenu.isOpen}
         onClose={() => setContextMenu((prev) => ({ ...prev, isOpen: false }))}
         playbackSpeed={playbackSpeed}
+        isEditMode={isEditMode}
+        isFlipped={isFlipped}
+        onToggleFlip={() => setIsFlipped((prev) => !prev)}
         onCaptureFrame={handleCaptureFrame}
         onPlaybackSpeedChange={handlePlaybackSpeedChange}
         onOpenInfoModal={handleOpenInfoModal}
-        onRotate={handleRotate}
-        onFlipH={handleFlipH}
-        flipH={flipH}
       />
 
       {/* 단축키 목록 및 제작자(Yusi0) / 깃허브 정보 모달 */}
