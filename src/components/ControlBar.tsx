@@ -463,9 +463,9 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                   onSaveClick();
                   (e.currentTarget as HTMLButtonElement).blur();
                 }}
-                disabled={!hasVideo}
+                disabled={!hasVideo || isCropMode}
                 className="flex items-center justify-center w-11 h-11 rounded-full text-white bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition-all duration-150 hover:scale-105 active:scale-95 disabled:bg-white/5 disabled:text-white/30 disabled:shadow-none disabled:scale-100 disabled:cursor-not-allowed cursor-pointer"
-                title={TOOLTIPS.controlBar.exportModal}
+                title={isCropMode ? "크롭 편집 중에는 완료를 먼저 눌러주세요" : TOOLTIPS.controlBar.exportModal}
               >
                 <Save className="w-5 h-5 stroke-white fill-none" />
               </button>

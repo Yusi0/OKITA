@@ -1138,6 +1138,11 @@ function App() {
   };
 
   const handleSaveClick = () => {
+    if (isCropMode) {
+      setToastMessage({ text: "크롭 편집 모드 중입니다. 상단 우측의 '완료' 버튼을 먼저 눌러주세요.", type: "error" });
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
     if (isImage) {
       handleExportImage();
     } else {
@@ -1833,19 +1838,20 @@ function App() {
 
               let cropClipStyle: string | undefined = undefined;
               let cropTransformStyle: string | undefined = undefined;
-              let cropTransformOrigin: string | undefined = undefined;
 
               if (isCropped && !isCropMode) {
                 // 1. 크롭 바깥 영역 마스킹
                 cropClipStyle = `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`;
 
-                // 2. 크롭 구역 확대 (Zoom / Expand) 스케일 및 트랜스폼 오리진 계산
-                const scale = 1 / Math.max(cropArea.w, cropArea.h);
-                const originX = (cropArea.x + cropArea.w / 2) * 100;
-                const originY = (cropArea.y + cropArea.h / 2) * 100;
+                // 2. 크롭 구역 중앙 정렬(Center Alignment) 및 확대 (Zoom Expand) 스케일 계산
+                const cropCenterX = cropArea.x + cropArea.w / 2;
+                const cropCenterY = cropArea.y + cropArea.h / 2;
 
-                cropTransformStyle = `scale(${scale})`;
-                cropTransformOrigin = `${originX}% ${originY}%`;
+                const transX = (0.5 - cropCenterX) * 100;
+                const transY = (0.5 - cropCenterY) * 100;
+                const scale = 1 / Math.max(cropArea.w, cropArea.h);
+
+                cropTransformStyle = `translate(${transX}%, ${transY}%) scale(${scale})`;
               }
 
               return (
@@ -1868,12 +1874,12 @@ function App() {
                       ref={imageRef}
                       src={videoSrc}
                       onLoad={() => {
-                        if (isCropMode) updateVideoRect();
+                        updateVideoRect();
                       }}
                       style={{
                         clipPath: cropClipStyle,
                         transform: cropTransformStyle,
-                        transformOrigin: cropTransformOrigin,
+                        transformOrigin: "center",
                         transition: "all 0.25s ease-out",
                       }}
                       className="w-full h-full object-contain pointer-events-none"
@@ -1896,7 +1902,7 @@ function App() {
                         style={{
                           clipPath: cropClipStyle,
                           transform: cropTransformStyle,
-                          transformOrigin: cropTransformOrigin,
+                          transformOrigin: "center",
                           transition: "all 0.25s ease-out",
                         }}
                         className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
@@ -1919,7 +1925,7 @@ function App() {
                         style={{
                           clipPath: cropClipStyle,
                           transform: cropTransformStyle,
-                          transformOrigin: cropTransformOrigin,
+                          transformOrigin: "center",
                           transition: "all 0.25s ease-out",
                         }}
                         className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
