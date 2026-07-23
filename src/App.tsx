@@ -1842,25 +1842,6 @@ function App() {
 
                 <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
 
-                {/* 크롭 초기화 버튼 */}
-                {isCropApplied && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsCropApplied(false);
-                      setAppliedCropArea(null);
-                      setCropArea({ x: 0, y: 0, w: 1, h: 1 });
-                      setCropAspectRatio("free");
-                      setIsCropMode(false);
-                      setTimeout(updateVideoRect, 50);
-                    }}
-                    title="크롭 해제 (원본 복원)"
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 text-xs font-medium transition-all cursor-pointer"
-                  >
-                    <span>초기화</span>
-                  </button>
-                )}
-
                 {/* 완료 버튼 (Step 3.2: 현재 cropArea를 appliedCropArea로 최종 확정) */}
                 <button
                   type="button"
@@ -1911,18 +1892,14 @@ function App() {
                 cropTransformStyle = `translate(${transX}%, ${transY}%) scale(${scale})`;
               }
 
-              // 화면 기준 90도/270도 회전 시 화면 상대적 좌우 반전(Screen-Relative Horizontal Flip) 보정
-              const isRotated90or270 = rotation === 90 || rotation === 270;
-              const cssScaleX = isRotated90or270 ? (flipV ? -1 : 1) : (flipH ? -1 : 1);
-              const cssScaleY = isRotated90or270 ? (flipH ? -1 : 1) : (flipV ? -1 : 1);
-
               return (
                 <div
                   className="relative flex items-center justify-center cursor-default shrink-0 transition-all duration-200"
                   style={{
                     width: box ? `${box.elemW}px` : "100%",
                     height: box ? `${box.elemH}px` : "100%",
-                    transform: `rotate(${rotation}deg) scaleX(${cssScaleX}) scaleY(${cssScaleY})`,
+                    // CSS 오른쪽->왼쪽 변환 순서: rotate(rotation) 후 scaleX(flipH)가 실행되어 90도 회전 상태에서도 화면 기준 좌우 반전 100% 적용
+                    transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1}) rotate(${rotation}deg)`,
                   }}
                   onMouseDown={handleVideoMouseDown}
                   onMouseUp={handleVideoMouseUp}
