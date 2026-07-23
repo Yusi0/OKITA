@@ -5,9 +5,10 @@ interface CropOverlayProps {
   cropArea: { x: number; y: number; w: number; h: number };
   onChange: (crop: { x: number; y: number; w: number; h: number }) => void;
   aspectRatio: string;
-  onAspectRatioChange: (ratio: string) => void;
+  onAspectRatioChange?: (ratio: string) => void;
   onRotate?: () => void;
   onFlipH?: () => void;
+  rotation?: number;
   flipH?: boolean;
 }
 
@@ -19,11 +20,28 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
   onAspectRatioChange: _onAspectRatioChange,
   onRotate: _onRotate,
   onFlipH: _onFlipH,
-  flipH: _flipH = false
+  rotation = 0,
+  flipH = false
 }) => {
   if (!videoRect) return null;
 
   const { width: containerWidth, height: containerHeight } = videoRect;
+
+  // 회전 및 반전 각도에 따른 화면 마우스 벡터 -> 로컬 트랜스폼 좌표 변환 헬퍼
+  const getLocalMouseDelta = (screenDx: number, screenDy: number) => {
+    const rad = -((rotation || 0) * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+
+    let localDx = screenDx * cos - screenDy * sin;
+    let localDy = screenDx * sin + screenDy * cos;
+
+    if (flipH) {
+      localDx = -localDx;
+    }
+
+    return { dx: localDx, dy: localDy };
+  };
 
   // 비율 값 수치 변환
   const getRatioVal = () => {
@@ -81,8 +99,9 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
     const startTop = cropArea.y;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const dx = (moveEvent.clientX - startX) / containerWidth;
-      const dy = (moveEvent.clientY - startY) / containerHeight;
+      const screenDx = (moveEvent.clientX - startX) / containerWidth;
+      const screenDy = (moveEvent.clientY - startY) / containerHeight;
+      const { dx, dy } = getLocalMouseDelta(screenDx, screenDy);
 
       let nextX = Math.max(0, Math.min(1 - cropArea.w, startLeft + dx));
       let nextY = Math.max(0, Math.min(1 - cropArea.h, startTop + dy));
@@ -113,8 +132,9 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
     const startHeight = cropArea.h;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const dx = (moveEvent.clientX - startX) / containerWidth;
-      const dy = (moveEvent.clientY - startY) / containerHeight;
+      const screenDx = (moveEvent.clientX - startX) / containerWidth;
+      const screenDy = (moveEvent.clientY - startY) / containerHeight;
+      const { dx, dy } = getLocalMouseDelta(screenDx, screenDy);
 
       let nextLeft = startLeft;
       let nextTop = startTop;

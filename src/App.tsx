@@ -1914,6 +1914,8 @@ function App() {
                       onChange={setCropArea}
                       aspectRatio={cropAspectRatio}
                       onAspectRatioChange={setCropAspectRatio}
+                      rotation={rotation}
+                      flipH={flipH}
                     />
                   )}
                 </div>
