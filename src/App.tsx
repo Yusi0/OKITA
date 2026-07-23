@@ -1830,9 +1830,23 @@ function App() {
             {(() => {
               const box = getMediaBoxDimensions();
               const isCropped = cropArea.x > 0.001 || cropArea.y > 0.001 || cropArea.w < 0.999 || cropArea.h < 0.999;
-              const cropClipStyle = (isCropped && !isCropMode)
-                ? `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`
-                : undefined;
+
+              let cropClipStyle: string | undefined = undefined;
+              let cropTransformStyle: string | undefined = undefined;
+              let cropTransformOrigin: string | undefined = undefined;
+
+              if (isCropped && !isCropMode) {
+                // 1. 크롭 바깥 영역 마스킹
+                cropClipStyle = `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`;
+
+                // 2. 크롭 구역 확대 (Zoom / Expand) 스케일 및 트랜스폼 오리진 계산
+                const scale = 1 / Math.max(cropArea.w, cropArea.h);
+                const originX = (cropArea.x + cropArea.w / 2) * 100;
+                const originY = (cropArea.y + cropArea.h / 2) * 100;
+
+                cropTransformStyle = `scale(${scale})`;
+                cropTransformOrigin = `${originX}% ${originY}%`;
+              }
 
               return (
                 <div
@@ -1858,6 +1872,9 @@ function App() {
                       }}
                       style={{
                         clipPath: cropClipStyle,
+                        transform: cropTransformStyle,
+                        transformOrigin: cropTransformOrigin,
+                        transition: "all 0.25s ease-out",
                       }}
                       className="w-full h-full object-contain pointer-events-none"
                     />
@@ -1878,6 +1895,9 @@ function App() {
                         }}
                         style={{
                           clipPath: cropClipStyle,
+                          transform: cropTransformStyle,
+                          transformOrigin: cropTransformOrigin,
+                          transition: "all 0.25s ease-out",
                         }}
                         className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
                           activePlayer === "A" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
@@ -1898,6 +1918,9 @@ function App() {
                         }}
                         style={{
                           clipPath: cropClipStyle,
+                          transform: cropTransformStyle,
+                          transformOrigin: cropTransformOrigin,
+                          transition: "all 0.25s ease-out",
                         }}
                         className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
                           activePlayer === "B" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
