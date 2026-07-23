@@ -1893,13 +1893,13 @@ function App() {
               }
 
               return (
+                /* Layer 1: 회전 전용 레이어 (시계 방향 +90/+180/+270도 정방향 회전) */
                 <div
                   className="relative flex items-center justify-center cursor-default shrink-0 transition-all duration-200"
                   style={{
                     width: box ? `${box.elemW}px` : "100%",
                     height: box ? `${box.elemH}px` : "100%",
-                    // CSS 오른쪽->왼쪽 변환 순서: rotate(rotation) 후 scaleX(flipH)가 실행되어 90도 회전 상태에서도 화면 기준 좌우 반전 100% 적용
-                    transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1}) rotate(${rotation}deg)`,
+                    transform: `rotate(${rotation}deg)`,
                   }}
                   onMouseDown={handleVideoMouseDown}
                   onMouseUp={handleVideoMouseUp}
@@ -1908,71 +1908,86 @@ function App() {
                   onTouchEnd={handleVideoTouchEnd}
                   onTouchCancel={handleVideoTouchCancel}
                 >
-                  {isImage ? (
-                    <img
-                      ref={imageRef}
-                      src={videoSrc}
-                      onLoad={() => {
-                        updateVideoRect();
-                      }}
+                  {/* Layer 2: 반전 전용 레이어 (독립적 좌우/상하 반전) */}
+                  <div
+                    className="relative w-full h-full flex items-center justify-center transition-transform duration-200"
+                    style={{
+                      transform: `scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+                    }}
+                  >
+                    {/* Layer 3: 크롭 마스킹 레이어 (clipPath 분리 적용) */}
+                    <div
+                      className="relative w-full h-full flex items-center justify-center overflow-hidden"
                       style={{
                         clipPath: cropClipStyle,
-                        transform: cropTransformStyle,
-                        transformOrigin: "center",
-                        transition: "all 0.25s ease-out",
+                        transition: "clip-path 0.25s ease-out",
                       }}
-                      className="w-full h-full object-fill pointer-events-none"
-                    />
-                  ) : (
-                    <>
-                      <video
-                        ref={videoRefA}
-                        src={videoSrc}
-                        onTimeUpdate={handleTimeUpdate}
-                        onLoadedMetadata={handleLoadedMetadata}
-                        onDurationChange={handleDurationChange}
-                        onEnded={handleVideoEnded}
-                        onPlay={() => setIsPlaying(true)}
-                        onPause={() => {
-                          if (!isJumpingRef.current && activePlayer === "A") {
-                            setIsPlaying(false);
-                          }
-                        }}
-                        style={{
-                          clipPath: cropClipStyle,
-                          transform: cropTransformStyle,
-                          transformOrigin: "center",
-                          transition: "all 0.25s ease-out",
-                        }}
-                        className={`w-full h-full object-fill absolute inset-0 transition-opacity duration-75 ${
-                          activePlayer === "A" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
-                        }`}
-                      />
-                      <video
-                        ref={videoRefB}
-                        src={videoSrc}
-                        onTimeUpdate={handleTimeUpdate}
-                        onLoadedMetadata={handleLoadedMetadata}
-                        onDurationChange={handleDurationChange}
-                        onEnded={handleVideoEnded}
-                        onPlay={() => setIsPlaying(true)}
-                        onPause={() => {
-                          if (!isJumpingRef.current && activePlayer === "B") {
-                            setIsPlaying(false);
-                          }
-                        }}
-                        style={{
-                          clipPath: cropClipStyle,
-                          transform: cropTransformStyle,
-                          transformOrigin: "center",
-                          transition: "all 0.25s ease-out",
-                        }}
-                        className={`w-full h-full object-fill absolute inset-0 transition-opacity duration-75 ${
-                          activePlayer === "B" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
-                        }`}
-                      />
-                    </>
-                  )}
+                    >
+                      {/* Layer 4: 실 미디어 엘리먼트 (크롭 중심점 확대/축소 스케일 적용) */}
+                      {isImage ? (
+                        <img
+                          ref={imageRef}
+                          src={videoSrc}
+                          onLoad={() => {
+                            updateVideoRect();
+                          }}
+                          style={{
+                            transform: cropTransformStyle,
+                            transformOrigin: "center",
+                            transition: "transform 0.25s ease-out",
+                          }}
+                          className="w-full h-full object-fill pointer-events-none"
+                        />
+                      ) : (
+                        <>
+                          <video
+                            ref={videoRefA}
+                            src={videoSrc}
+                            onTimeUpdate={handleTimeUpdate}
+                            onLoadedMetadata={handleLoadedMetadata}
+                            onDurationChange={handleDurationChange}
+                            onEnded={handleVideoEnded}
+                            onPlay={() => setIsPlaying(true)}
+                            onPause={() => {
+                              if (!isJumpingRef.current && activePlayer === "A") {
+                                setIsPlaying(false);
+                              }
+                            }}
+                            style={{
+                              transform: cropTransformStyle,
+                              transformOrigin: "center",
+                              transition: "transform 0.25s ease-out",
+                            }}
+                            className={`w-full h-full object-fill absolute inset-0 transition-opacity duration-75 ${
+                              activePlayer === "A" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
+                            }`}
+                          />
+                          <video
+                            ref={videoRefB}
+                            src={videoSrc}
+                            onTimeUpdate={handleTimeUpdate}
+                            onLoadedMetadata={handleLoadedMetadata}
+                            onDurationChange={handleDurationChange}
+                            onEnded={handleVideoEnded}
+                            onPlay={() => setIsPlaying(true)}
+                            onPause={() => {
+                              if (!isJumpingRef.current && activePlayer === "B") {
+                                setIsPlaying(false);
+                              }
+                            }}
+                            style={{
+                              transform: cropTransformStyle,
+                              transformOrigin: "center",
+                              transition: "transform 0.25s ease-out",
+                            }}
+                            className={`w-full h-full object-fill absolute inset-0 transition-opacity duration-75 ${
+                              activePlayer === "B" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
+                            }`}
+                          />
+                        </>
+                      )}
+                    </div>
+                  </div>
 
                   {/* 크롭 조절 박스 레이어 - 미디어와 1:1 로컬 트랜스폼 공간 공유 */}
                   {isCropMode && (

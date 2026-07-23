@@ -252,18 +252,18 @@ fn get_audio_codec(app_handle: &tauri::AppHandle, path: &str) -> Option<String> 
 
 fn get_orient_filter_str(rotation: Option<i32>, flip_h: Option<bool>, flip_v: Option<bool>) -> String {
     let mut filters = Vec::new();
+    if flip_h.unwrap_or(false) {
+        filters.push("hflip".to_string());
+    }
+    if flip_v.unwrap_or(false) {
+        filters.push("vflip".to_string());
+    }
     let rot = rotation.unwrap_or(0);
     match rot {
         90 => filters.push("transpose=1".to_string()),
         180 => filters.push("transpose=1,transpose=1".to_string()),
         270 => filters.push("transpose=2".to_string()),
         _ => {}
-    }
-    if flip_h.unwrap_or(false) {
-        filters.push("hflip".to_string());
-    }
-    if flip_v.unwrap_or(false) {
-        filters.push("vflip".to_string());
     }
     if filters.is_empty() {
         "".to_string()
@@ -793,18 +793,18 @@ async fn export_image(
     if let (Some(x), Some(y), Some(w), Some(h)) = (crop_x, crop_y, crop_w, crop_h) {
         vf_filters.push(format!("crop={}:{}:{}:{}", w, h, x, y));
     }
+    if flip_h.unwrap_or(false) {
+        vf_filters.push("hflip".to_string());
+    }
+    if flip_v.unwrap_or(false) {
+        vf_filters.push("vflip".to_string());
+    }
     let rot = rotation.unwrap_or(0);
     match rot {
         90 => vf_filters.push("transpose=1".to_string()),
         180 => vf_filters.push("transpose=1,transpose=1".to_string()),
         270 => vf_filters.push("transpose=2".to_string()),
         _ => {}
-    }
-    if flip_h.unwrap_or(false) {
-        vf_filters.push("hflip".to_string());
-    }
-    if flip_v.unwrap_or(false) {
-        vf_filters.push("vflip".to_string());
     }
     if !vf_filters.is_empty() {
         cmd.arg("-vf").arg(vf_filters.join(","));
