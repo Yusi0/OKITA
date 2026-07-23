@@ -855,6 +855,14 @@ pub fn run() {
 
             #[cfg(target_os = "windows")]
             {
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = window.set_icon(icon.clone());
+                }
+            }
+
+            // 기존 mica/acrylic 투명 창 설정 코드
+            #[cfg(target_os = "windows")]
+            {
                 if let Err(_) = apply_mica(&window, None) {
                     let _ = apply_acrylic(&window, Some((20, 20, 20, 120)));
                 }
@@ -869,8 +877,7 @@ pub fn run() {
             save_frame,
             get_startup_file,
             get_neighbor_files,
-            export_image,
-            generate_gif_preview
+            export_image
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

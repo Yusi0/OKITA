@@ -10,15 +10,14 @@ interface InfoModalProps {
 
 const KEYBINDS = [
   { key: "Space / K", desc: "재생 및 일시정지" },
-  { key: "← / →", desc: "5초 이동 (Ctrl: 1초, Shift: 1프레임)" },
-  { key: "Shift + ← / →", desc: "1프레임 정밀 이동 (Frame Step)" },
+  { key: "← / →", desc: "5초 이동" },
+  { key: "Ctrl + ← / →", desc: "초 단위 이동" },
+  { key: "Shift + ← / →", desc: "프레임 이동" },
   { key: "Delete / Backspace", desc: "선택한 클립 삭제" },
-  { key: "Ctrl + Z / Ctrl + Y", desc: "Undo / Redo" },
-  { key: "C", desc: "화면 크롭(Crop) 모드 토글" },
-  { key: "E", desc: "타임라인 편집(Edit) 모드 토글" },
-  { key: "S", desc: "현재 장면 고화질 캡처" },
-  { key: "F / 더블 클릭", desc: "전체 화면 토글" },
-  { key: "Esc", desc: "모달 닫기 / 크롭 해제" },
+  { key: "Ctrl + Z", desc: "되돌리기" },
+  { key: "Ctrl + Shift + Z / Ctrl + Y", desc: "다시 실행" },
+  { key: "C", desc: "현재 플레이헤드에서 분할" },
+  { key: "F / 더블 클릭", desc: "전체 화면" },
 ];
 
 export const InfoModal: React.FC<InfoModalProps> = ({
@@ -47,17 +46,16 @@ export const InfoModal: React.FC<InfoModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in">
       <div className="relative w-full max-w-lg rounded-2xl bg-neutral-900 border border-white/10 p-6 shadow-2xl flex flex-col gap-5 text-white animate-in zoom-in-95 duration-150">
-        
+
         {/* 상단 헤더 및 탭 */}
         <div className="flex items-center justify-between border-b border-white/5 pb-3">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setActiveTab("keybinds")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === "keybinds"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "keybinds"
                   ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
                   : "text-white/60 hover:text-white hover:bg-white/5"
-              }`}
+                }`}
             >
               <Keyboard className="w-3.5 h-3.5" />
               <span>단축키 목록</span>
@@ -65,11 +63,10 @@ export const InfoModal: React.FC<InfoModalProps> = ({
 
             <button
               onClick={() => setActiveTab("about")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === "about"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === "about"
                   ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
                   : "text-white/60 hover:text-white hover:bg-white/5"
-              }`}
+                }`}
             >
               <Info className="w-3.5 h-3.5" />
               <span>앱 정보 & 제작자</span>
