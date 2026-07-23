@@ -52,7 +52,8 @@ function App() {
 
   // 크롭(Crop) 및 캡처 관련 상태 정의
   const [isCropMode, setIsCropMode] = useState(false);
-  const [cropArea, setCropArea] = useState<{ x: number; y: number; w: number; h: number }>({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
+  const [isCropApplied, setIsCropApplied] = useState(false);
+  const [cropArea, setCropArea] = useState<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 1, h: 1 });
   const [cropAspectRatio, setCropAspectRatio] = useState<string>("free");
   const [videoRect, setVideoRect] = useState<DOMRect | null>(null);
   const [isRatioDropdownOpen, setIsRatioDropdownOpen] = useState<boolean>(false);
@@ -1112,7 +1113,8 @@ function App() {
       let cropW: number | null = null;
       let cropH: number | null = null;
 
-      if (isCropMode && imageRef.current) {
+      const isCropped = isCropApplied || (cropArea.x > 0.001 || cropArea.y > 0.001 || cropArea.w < 0.999 || cropArea.h < 0.999);
+      if (isCropped && imageRef.current) {
         const img = imageRef.current;
         cropX = Math.round(cropArea.x * img.naturalWidth);
         cropY = Math.round(cropArea.y * img.naturalHeight);
@@ -1127,6 +1129,9 @@ function App() {
         cropY,
         cropW,
         cropH,
+        rotation,
+        flipH,
+        flipV,
       });
 
       setToastMessage({
@@ -1500,12 +1505,25 @@ function App() {
       let cropW: number | null = null;
       let cropH: number | null = null;
 
-      const video = getActiveVideo();
-      if (isCropMode && video) {
-        cropX = Math.round(cropArea.x * video.videoWidth);
-        cropY = Math.round(cropArea.y * video.videoHeight);
-        cropW = Math.round(cropArea.w * video.videoWidth);
-        cropH = Math.round(cropArea.h * video.videoHeight);
+      const isCropped = isCropApplied || (cropArea.x > 0.001 || cropArea.y > 0.001 || cropArea.w < 0.999 || cropArea.h < 0.999);
+      let nativeW = 0;
+      let nativeH = 0;
+      if (isImage && imageRef.current) {
+        nativeW = imageRef.current.naturalWidth;
+        nativeH = imageRef.current.naturalHeight;
+      } else {
+        const video = getActiveVideo();
+        if (video) {
+          nativeW = video.videoWidth;
+          nativeH = video.videoHeight;
+        }
+      }
+
+      if (isCropped && nativeW > 0 && nativeH > 0) {
+        cropX = Math.round(cropArea.x * nativeW);
+        cropY = Math.round(cropArea.y * nativeH);
+        cropW = Math.round(cropArea.w * nativeW);
+        cropH = Math.round(cropArea.h * nativeH);
       }
 
       await invoke("export_video", {
@@ -1822,7 +1840,10 @@ function App() {
                 {/* 완료 버튼 */}
                 <button
                   type="button"
-                  onClick={() => setIsCropMode(false)}
+                  onClick={() => {
+                    setIsCropMode(false);
+                    setIsCropApplied(true);
+                  }}
                   className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-xs font-semibold text-white shadow-lg shadow-emerald-600/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
                 >
                   완료
@@ -1843,7 +1864,7 @@ function App() {
             {/* 미디어 렌더러 (비디오 vs 이미지 통합 래퍼 컨테이너 - 회전 크기 자동 맞춤 및 크롭오버레이 1:1 공유) */}
             {(() => {
               const box = getMediaBoxDimensions();
-              const isCropped = cropArea.x > 0.001 || cropArea.y > 0.001 || cropArea.w < 0.999 || cropArea.h < 0.999;
+              const isCropped = isCropApplied || (cropArea.x > 0.001 || cropArea.y > 0.001 || cropArea.w < 0.999 || cropArea.h < 0.999);
 
               let cropClipStyle: string | undefined = undefined;
               let cropTransformStyle: string | undefined = undefined;
