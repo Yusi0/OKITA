@@ -613,13 +613,17 @@ function App() {
     handleMouseMove();
   }, [isPlaying, videoSrc]);
 
-  // 크롭 모드 및 회전/반전/비율 변경 시 미디어 레터박스 영역 비동기 재계산
+  // 크롭 모드 및 회전/반전/비율 변경 시 미디어 영역 및 레터박스 재계산
   useEffect(() => {
-    if (isCropMode) {
-      const timer = setTimeout(updateVideoRect, 60);
-      return () => clearTimeout(timer);
-    }
-  }, [isCropMode, rotation, flipH, cropAspectRatio]);
+    updateVideoRect();
+    const timer = setTimeout(updateVideoRect, 50);
+    const handleResize = () => updateVideoRect();
+    window.addEventListener("resize", handleResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [isCropMode, rotation, flipH, cropAspectRatio, videoSrc, isEditMode]);
 
   const smoothTimeRef = useRef<number>(0);
 
@@ -1688,7 +1692,64 @@ function App() {
         </div>
       )}
 
+      {/* 크롭 모드 전용 상단 툴바 (OKITA CANVAS 상단바 바로 하단에 독립 배치되는 전용 헤더 바) */}
+      {isCropMode && (
+        <div className="relative flex-none flex items-center justify-between px-5 py-2 bg-neutral-900/95 border-b border-white/10 shadow-xl backdrop-blur-2xl z-40 animate-[slideDown_0.2s_ease-out]">
+          {/* 좌측 크롭 안내 모드 라벨 */}
+          <div className="flex items-center gap-2.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse" />
+            <span className="text-xs font-semibold tracking-wide text-white">크롭 & 회전 설정</span>
+          </div>
 
+          {/* 우측 독립 툴바 영역 */}
+          <div className="flex items-center gap-2">
+            {/* 90도 회전 (아이콘 단독) */}
+            <button
+              type="button"
+              onClick={handleRotate}
+              title="90도 시계방향 회전 (R)"
+              className="p-2 rounded-xl bg-white/5 hover:bg-white/15 active:bg-white/10 border border-white/10 text-white/90 transition-all cursor-pointer"
+            >
+              <RotateCw className="w-4 h-4 text-indigo-400" />
+            </button>
+
+            {/* 좌우 반전 (아이콘 단독) */}
+            <button
+              type="button"
+              onClick={handleFlipH}
+              title="좌우 거울 반전 (H)"
+              className={`p-2 rounded-xl border transition-all cursor-pointer ${
+                flipH
+                  ? "bg-indigo-600/80 border-indigo-500 text-white font-semibold shadow-md shadow-indigo-600/30"
+                  : "bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/10 text-white/90"
+              }`}
+            >
+              <FlipHorizontal className="w-4 h-4" />
+            </button>
+
+            <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
+
+            {/* 비율 선택 커스텀 드롭다운 */}
+            <RatioDropdown
+              aspectRatio={cropAspectRatio}
+              onChange={(ratio) => {
+                setCropAspectRatio(ratio);
+              }}
+            />
+
+            <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
+
+            {/* 완료 버튼 */}
+            <button
+              type="button"
+              onClick={() => setIsCropMode(false)}
+              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-xs font-semibold text-white shadow-lg shadow-emerald-600/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
+            >
+              완료
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 인앱 커스텀 토스트 알림 메시지 */}
       {toastMessage && (
@@ -1702,72 +1763,15 @@ function App() {
         </div>
       )}
 
-      {/* 메인 콘텐츠 영역 (크롭 모드 시 상단 마진 pt-[52px], 편집 모드 시 하단 pb-[130px]) */}
+      {/* 메인 콘텐츠 영역 (편집 모드 시 비디오가 컨트롤 바 위로 축소되도록 바인딩) */}
       <div
         ref={mediaContainerRef}
         className={`relative flex-1 flex items-center justify-center overflow-hidden z-10 transition-all duration-300 ${
-          isCropMode ? "pt-[52px]" : ""
-        } ${isEditMode ? "pb-[130px]" : ""}`}
+          isEditMode ? "pb-[130px]" : ""
+        }`}
       >
         {videoSrc ? (
           <div className="relative w-full h-full flex items-center justify-center bg-black/10">
-            {/* 크롭 모드 전용 우상단 플로팅 툴바 (아이콘 단독 & 커스텀 비율 드롭다운) */}
-            {isCropMode && (
-              <div className="absolute top-3 right-4 z-50 flex items-center gap-1.5 p-1.5 px-2 rounded-2xl bg-neutral-900/90 border border-white/10 shadow-2xl backdrop-blur-2xl text-xs text-white/90 animate-[fadeIn_0.2s_ease-out]">
-                {/* 90도 회전 (아이콘 단독) */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleRotate();
-                    setTimeout(updateVideoRect, 50);
-                  }}
-                  title="90도 시계방향 회전 (R)"
-                  className="p-2 rounded-xl bg-white/5 hover:bg-white/15 active:bg-white/10 transition-all cursor-pointer"
-                >
-                  <RotateCw className="w-4 h-4 text-indigo-400" />
-                </button>
-
-                {/* 좌우 반전 (아이콘 단독) */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleFlipH();
-                    setTimeout(updateVideoRect, 50);
-                  }}
-                  title="좌우 거울 반전 (H)"
-                  className={`p-2 rounded-xl transition-all cursor-pointer ${
-                    flipH
-                      ? "bg-indigo-600/80 text-white font-semibold shadow-md shadow-indigo-600/30"
-                      : "bg-white/5 hover:bg-white/15 active:bg-white/10 text-white/90"
-                  }`}
-                >
-                  <FlipHorizontal className="w-4 h-4" />
-                </button>
-
-                <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
-
-                {/* 비율 선택 커스텀 드롭다운 */}
-                <RatioDropdown
-                  aspectRatio={cropAspectRatio}
-                  onChange={(ratio) => {
-                    setCropAspectRatio(ratio);
-                    setTimeout(updateVideoRect, 50);
-                  }}
-                />
-
-                <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
-
-                {/* 완료 버튼 */}
-                <button
-                  type="button"
-                  onClick={() => setIsCropMode(false)}
-                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-xs font-semibold text-white shadow-lg shadow-emerald-600/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
-                >
-                  완료
-                </button>
-              </div>
-            )}
-
             {/* 움짤 배지 */}
             <AnimatedGifBadge isAnimatedGif={isAnimatedGif} filePath={filePath} />
 
@@ -1788,11 +1792,18 @@ function App() {
                 }}
                 style={{
                   transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1})`,
-                  transition: "transform 0.15s ease-out",
+                  transition: "transform 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out",
                   ...((rotation === 90 || rotation === 270) && videoRect
                     ? {
                         width: `${videoRect.height}px`,
                         height: `${videoRect.width}px`,
+                        maxWidth: "none",
+                        maxHeight: "none",
+                      }
+                    : videoRect
+                    ? {
+                        width: `${videoRect.width}px`,
+                        height: `${videoRect.height}px`,
                         maxWidth: "none",
                         maxHeight: "none",
                       }
@@ -1802,18 +1813,25 @@ function App() {
                         objectFit: "contain",
                       }),
                 }}
-                className="w-full h-full object-contain pointer-events-none"
+                className="object-contain pointer-events-none"
               />
             ) : (
               <div
-                className="relative w-full h-full flex items-center justify-center cursor-default"
+                className="relative flex items-center justify-center cursor-default"
                 style={{
                   transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1})`,
-                  transition: "transform 0.15s ease-out",
+                  transition: "transform 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out",
                   ...((rotation === 90 || rotation === 270) && videoRect
                     ? {
                         width: `${videoRect.height}px`,
                         height: `${videoRect.width}px`,
+                        maxWidth: "none",
+                        maxHeight: "none",
+                      }
+                    : videoRect
+                    ? {
+                        width: `${videoRect.width}px`,
+                        height: `${videoRect.height}px`,
                         maxWidth: "none",
                         maxHeight: "none",
                       }
