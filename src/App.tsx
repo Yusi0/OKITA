@@ -1853,9 +1853,15 @@ function App() {
                 cropClipStyle = `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`;
 
                 // 2. 크롭 구역 중앙 정렬(Center Alignment) 및 확대 (Zoom Expand) 스케일 계산
+                const isRotated90 = rotation === 90 || rotation === 270;
                 const cx = cropArea.x + cropArea.w / 2;
                 const cy = cropArea.y + cropArea.h / 2;
-                const scale = 1 / Math.max(cropArea.w, cropArea.h);
+
+                // 90도/270도 회전 시 화면상의 가로/세로 크롭 크기 스와프(Swap)
+                const effectiveW = isRotated90 ? cropArea.h : cropArea.w;
+                const effectiveH = isRotated90 ? cropArea.w : cropArea.h;
+
+                const scale = 1 / Math.max(effectiveW, effectiveH);
 
                 const transX = scale * (0.5 - cx) * 100;
                 const transY = scale * (0.5 - cy) * 100;
