@@ -117,7 +117,7 @@ export const InfoModal: React.FC<InfoModalProps> = ({
             <div className="flex flex-col items-center gap-1">
               <h2 className="text-lg font-bold tracking-wider text-white">OKITA Canvas</h2>
               <span className="text-xs font-semibold text-indigo-400 bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
-                v0.2.1
+                v0.2.2
               </span>
             </div>
 
