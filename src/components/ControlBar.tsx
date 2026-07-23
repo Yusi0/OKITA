@@ -11,7 +11,10 @@ import {
   Scissors,
   Save,
   Crop,
-  Camera
+  Camera,
+  RotateCw,
+  FlipHorizontal,
+  FlipVertical
 } from "lucide-react";
 
 export interface ClipSegment {
@@ -57,6 +60,12 @@ interface ControlBarProps {
   onSelectClip?: (id: string) => void;
   dropInsertIndex?: number | null;
   isDraggingAsset?: boolean;
+  rotation?: number;
+  flipH?: boolean;
+  flipV?: boolean;
+  onRotate?: () => void;
+  onFlipH?: () => void;
+  onFlipV?: () => void;
 }
 
 const formatTime = (seconds: number) => {
@@ -100,7 +109,13 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   selectedClipId,
   onSelectClip,
   dropInsertIndex,
-  isDraggingAsset
+  isDraggingAsset,
+  rotation = 0,
+  flipH = false,
+  flipV = false,
+  onRotate,
+  onFlipH,
+  onFlipV
 }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -440,6 +455,57 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                 title={TOOLTIPS.controlBar.captureFrame}
               >
                 <Camera className="w-4.5 h-4.5" />
+              </button>
+            )}
+
+            {/* Rotate 90 deg Button */}
+            {hasVideo && onRotate && (
+              <button
+                onClick={(e) => {
+                  onRotate();
+                  (e.currentTarget as HTMLButtonElement).blur();
+                }}
+                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${rotation !== 0
+                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40"
+                    : "text-white/90 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
+                  }`}
+                title={TOOLTIPS.controlBar.rotate}
+              >
+                <RotateCw className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* Flip Horizontal Button */}
+            {hasVideo && onFlipH && (
+              <button
+                onClick={(e) => {
+                  onFlipH();
+                  (e.currentTarget as HTMLButtonElement).blur();
+                }}
+                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${flipH
+                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40"
+                    : "text-white/90 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
+                  }`}
+                title={TOOLTIPS.controlBar.flipH}
+              >
+                <FlipHorizontal className="w-4 h-4" />
+              </button>
+            )}
+
+            {/* Flip Vertical Button */}
+            {hasVideo && onFlipV && (
+              <button
+                onClick={(e) => {
+                  onFlipV();
+                  (e.currentTarget as HTMLButtonElement).blur();
+                }}
+                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${flipV
+                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40"
+                    : "text-white/90 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
+                  }`}
+                title={TOOLTIPS.controlBar.flipV}
+              >
+                <FlipVertical className="w-4 h-4" />
               </button>
             )}
           </div>

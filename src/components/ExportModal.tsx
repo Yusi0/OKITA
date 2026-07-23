@@ -43,6 +43,9 @@ interface ExportModalProps {
   cropArea?: { x: number; y: number; w: number; h: number };
   isAudioOnly?: boolean;
   clips?: ClipSegment[];
+  rotation?: number;
+  flipH?: boolean;
+  flipV?: boolean;
 }
 
 const CRF_OPTIONS = [18, 23, 28, 32];
@@ -103,7 +106,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   initialTab = "video",
   cropArea,
   isAudioOnly = false,
-  clips
+  clips,
+  rotation = 0,
+  flipH = false,
+  flipV = false
 }) => {
   // 상단 탭 선택: "video" | "gif" | "audio"
   const [activeTab, setActiveTab] = useState<ExportType>(isAudioOnly ? "audio" : initialTab);
@@ -149,7 +155,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
   };
 
-  // 모달 오픈 시 initialTab 및 속도/크롭 설정 동기화
+  // 모달 오픈 시 initialTab 및 속도/크롭/회전/반전 설정 동기화
   useEffect(() => {
     if (isOpen) {
       if (isAudioOnly) {
@@ -158,7 +164,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         setActiveTab(initialTab);
       }
       setExportSpeed(initialExportSpeed);
-      if (isCropMode || initialExportSpeed !== 1.0) {
+      if (isCropMode || initialExportSpeed !== 1.0 || rotation !== 0 || flipH || flipV) {
         setSaveMode("encode");
       }
       currentClipIdxRef.current = 0;
@@ -296,42 +302,42 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           const targetW = Math.max(16, Math.floor(sw * scaleFactor));
           const targetH = Math.max(16, Math.floor(sh * scaleFactor));
 
-          if (targetDimensions.w !== targetW || targetDimensions.h !== targetH) {
-            setTargetDimensions({ w: targetW, h: targetH });
+          const isRotated90 = rotation === 90 || rotation === 270;
+          const canvasW = isRotated90 ? targetH : targetW;
+          const canvasH = isRotated90 ? targetW : targetH;
+
+          if (targetDimensions.w !== canvasW || targetDimensions.h !== canvasH) {
+            setTargetDimensions({ w: canvasW, h: canvasH });
           }
 
-          // 1. 모달 메인 미리보기 캔버스 렌더링 (크롭 & 256색 팔레트 양자화 렌더링)
-          if (previewCanvasRef.current) {
-            const canvas = previewCanvasRef.current;
-            if (canvas.width !== targetW || canvas.height !== targetH) {
-              canvas.width = targetW;
-              canvas.height = targetH;
+          const drawFrameToCanvas = (canvas: HTMLCanvasElement) => {
+            if (canvas.width !== canvasW || canvas.height !== canvasH) {
+              canvas.width = canvasW;
+              canvas.height = canvasH;
             }
             const ctx = canvas.getContext("2d");
             if (ctx) {
-              ctx.imageSmoothingEnabled = false; // 도트/픽셀 화질 저하 렌더링 적용
-              ctx.drawImage(video, sx, sy, sw, sh, 0, 0, targetW, targetH);
+              ctx.save();
+              ctx.imageSmoothingEnabled = false;
+              ctx.translate(canvasW / 2, canvasH / 2);
+              ctx.rotate((rotation * Math.PI) / 180);
+              ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+              ctx.drawImage(video, sx, sy, sw, sh, -targetW / 2, -targetH / 2, targetW, targetH);
+              ctx.restore();
               if (gifFormat === "gif") {
-                apply256ColorPalette(ctx, targetW, targetH);
+                apply256ColorPalette(ctx, canvasW, canvasH);
               }
             }
+          };
+
+          // 1. 모달 메인 미리보기 캔버스 렌더링
+          if (previewCanvasRef.current) {
+            drawFrameToCanvas(previewCanvasRef.current);
           }
 
           // 2. 확대 미리보기 모달 캔버스 렌더링 (열려 있을 때)
           if (isEnlargedOpen && enlargedCanvasRef.current) {
-            const canvas = enlargedCanvasRef.current;
-            if (canvas.width !== targetW || canvas.height !== targetH) {
-              canvas.width = targetW;
-              canvas.height = targetH;
-            }
-            const ctx = canvas.getContext("2d");
-            if (ctx) {
-              ctx.imageSmoothingEnabled = false;
-              ctx.drawImage(video, sx, sy, sw, sh, 0, 0, targetW, targetH);
-              if (gifFormat === "gif") {
-                apply256ColorPalette(ctx, targetW, targetH);
-              }
-            }
+            drawFrameToCanvas(enlargedCanvasRef.current);
           }
         }
       }

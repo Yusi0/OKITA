@@ -56,10 +56,18 @@ function App() {
   const [cropAspectRatio, setCropAspectRatio] = useState<string>("free");
   const [videoRect, setVideoRect] = useState<DOMRect | null>(null);
 
-  // 시청 배속 상태 정의 (기본 1.0배속)
+  // 시청 배속 및 음소거 상태 정의
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
-  // 편집 음소거 상태 정의 (기본 false)
   const [isEditMuted, setIsEditMuted] = useState<boolean>(false);
+
+  // 미디어 회전 (0, 90, 180, 270) 및 반전 (flipH, flipV) 상태 정의
+  const [rotation, setRotation] = useState<number>(0);
+  const [flipH, setFlipH] = useState<boolean>(false);
+  const [flipV, setFlipV] = useState<boolean>(false);
+
+  const handleRotate = () => setRotation((prev) => (prev + 90) % 360);
+  const handleFlipH = () => setFlipH((prev) => !prev);
+  const handleFlipV = () => setFlipV((prev) => !prev);
 
   // v0.2.0 멀티 클립 타임라인 관련 상태 및 동기식 useRef 히스토리 스택 정의
   const [clips, setClips] = useState<ClipSegment[]>([]);
@@ -1188,6 +1196,18 @@ function App() {
           e.preventDefault();
           handleSplitClip();
           break;
+        case "KeyR":
+          e.preventDefault();
+          handleRotate();
+          break;
+        case "KeyH":
+          e.preventDefault();
+          handleFlipH();
+          break;
+        case "KeyV":
+          e.preventDefault();
+          handleFlipV();
+          break;
         case "KeyZ":
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
@@ -1342,12 +1362,20 @@ function App() {
       if (!savePath) return;
 
       const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      const isRotated90 = rotation === 90 || rotation === 270;
+      const canvasW = isRotated90 ? video.videoHeight : video.videoWidth;
+      const canvasH = isRotated90 ? video.videoWidth : video.videoHeight;
+      canvas.width = canvasW;
+      canvas.height = canvasH;
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas context를 생성할 수 없습니다.");
 
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.translate(canvasW / 2, canvasH / 2);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+      ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, -video.videoWidth / 2, -video.videoHeight / 2, video.videoWidth, video.videoHeight);
+      ctx.restore();
 
       canvas.toBlob(async (blob) => {
         if (!blob) {
@@ -1467,6 +1495,9 @@ function App() {
         cropH,
         exportSpeed,
         isMuted: isEditMuted,
+        rotation,
+        flipH,
+        flipV,
         exportType,
         gifFps,
         gifQuality,
@@ -1695,11 +1726,19 @@ function App() {
                 onLoad={() => {
                   if (isCropMode) updateVideoRect();
                 }}
+                style={{
+                  transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+                  transition: "transform 0.15s ease-out",
+                }}
                 className="w-full h-full object-contain pointer-events-none"
               />
             ) : (
               <div
                 className="relative w-full h-full flex items-center justify-center cursor-default"
+                style={{
+                  transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+                  transition: "transform 0.15s ease-out",
+                }}
                 onMouseDown={handleVideoMouseDown}
                 onMouseUp={handleVideoMouseUp}
                 onMouseLeave={handleVideoMouseLeave}
@@ -1828,6 +1867,9 @@ function App() {
         isAudioOnly={isAudio}
         cropArea={cropArea}
         clips={clips}
+        rotation={rotation}
+        flipH={flipH}
+        flipV={flipV}
       />
 
       {/* 플로팅 컨트롤 바 */}
@@ -1870,6 +1912,12 @@ function App() {
         onSelectClip={(id) => setSelectedClipId(id)}
         dropInsertIndex={dropInsertIndex}
         isDraggingAsset={isDragOver}
+        rotation={rotation}
+        flipH={flipH}
+        flipV={flipV}
+        onRotate={handleRotate}
+        onFlipH={handleFlipH}
+        onFlipV={handleFlipV}
       />
 
       {/* 추출 진행 중 모달 오버레이 */}

@@ -17,6 +17,8 @@ const KEYBINDS = [
   { key: "Ctrl + Z", desc: "되돌리기" },
   { key: "Ctrl + Shift + Z / Ctrl + Y", desc: "다시 실행" },
   { key: "C", desc: "현재 플레이헤드에서 분할" },
+  { key: "R", desc: "90도 시계방향 회전" },
+  { key: "H / V", desc: "좌우 / 상하 반전" },
   { key: "F / 더블 클릭", desc: "전체 화면" },
 ];
 

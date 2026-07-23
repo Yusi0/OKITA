@@ -21,6 +21,9 @@ export const TOOLTIPS = {
     deleteClip: "선택한 클립 삭제",
     fullscreen: "전체 화면",
     playbackSpeed: "재생 속도",
+    rotate: "90도 시계방향 회전 (R)",
+    flipH: "좌우 반전 (H)",
+    flipV: "상하 반전 (V)",
   },
 
   // 2. 우클릭 커스텀 컨텍스트 메뉴 라벨 및 설명
