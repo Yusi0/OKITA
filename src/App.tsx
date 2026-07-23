@@ -198,6 +198,7 @@ function App() {
   };
 
   const imageRef = useRef<HTMLImageElement>(null);
+  const mediaContainerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<number | null>(null);
 
   // 플레이리스트 (같은 폴더 미디어 목록) 관련 상태
@@ -213,75 +214,72 @@ function App() {
   const isImage = filePath ? /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(filePath) : false;
   const isAnimatedGif = filePath ? /\.(gif|webp)$/i.test(filePath) : false;
 
-  // 실제 렌더링된 미디어 사각형 영역 계산 (부모 컨테이너 기준 미반전/미회전 순수 렌더 사각형)
-  const calculateMediaRenderRect = () => {
+  // 회전 각도 및 뷰포트 크기에 따른 회전 미디어 맞춤 크기 계산 헬퍼
+  const getMediaBoxDimensions = () => {
+    if (!mediaContainerRef.current) return null;
+    const containerW = mediaContainerRef.current.clientWidth;
+    const containerH = mediaContainerRef.current.clientHeight;
+
+    let nativeW = 0;
+    let nativeH = 0;
+
     if (isImage) {
-      if (!imageRef.current) return null;
-      const img = imageRef.current;
-      const container = img.parentElement;
-      if (!container || img.naturalWidth === 0) return null;
-
-      const containerW = container.clientWidth;
-      const containerH = container.clientHeight;
-
-      const imgRatio = img.naturalWidth / img.naturalHeight;
-      const containerRatio = containerW / containerH;
-
-      let renderWidth = containerW;
-      let renderHeight = containerH;
-      let renderLeft = 0;
-      let renderTop = 0;
-
-      if (containerRatio > imgRatio) {
-        renderWidth = containerH * imgRatio;
-        renderLeft = (containerW - renderWidth) / 2;
-      } else {
-        renderHeight = containerW / imgRatio;
-        renderTop = (containerH - renderHeight) / 2;
+      if (imageRef.current) {
+        nativeW = imageRef.current.naturalWidth;
+        nativeH = imageRef.current.naturalHeight;
       }
-
-      return {
-        x: renderLeft,
-        y: renderTop,
-        left: renderLeft,
-        top: renderTop,
-        width: renderWidth,
-        height: renderHeight
-      } as DOMRect;
     } else {
       const video = getActiveVideo();
-      if (!video) return null;
-      const container = video.parentElement;
-      if (!container || video.videoWidth === 0) return null;
-
-      const containerW = container.clientWidth;
-      const containerH = container.clientHeight;
-
-      const videoRatio = video.videoWidth / video.videoHeight;
-      const containerRatio = containerW / containerH;
-
-      let renderWidth = containerW;
-      let renderHeight = containerH;
-      let renderLeft = 0;
-      let renderTop = 0;
-
-      if (containerRatio > videoRatio) {
-        renderWidth = containerH * videoRatio;
-        renderLeft = (containerW - renderWidth) / 2;
-      } else {
-        renderHeight = containerW / videoRatio;
-        renderTop = (containerH - renderHeight) / 2;
+      if (video) {
+        nativeW = video.videoWidth;
+        nativeH = video.videoHeight;
       }
-
-      return {
-        x: renderLeft,
-        y: renderTop,
-        left: renderLeft,
-        top: renderTop,
-        width: renderWidth,
-        height: renderHeight
-      } as DOMRect;
     }
+
+    if (!nativeW || !nativeH || !containerW || !containerH) return null;
+
+    const isRotated90 = rotation === 90 || rotation === 270;
+    const nativeRatio = nativeW / nativeH;
+
+    // 회전 각도에 따른 화면 기준 실효 종횡비
+    const effectiveRatio = isRotated90 ? (1 / nativeRatio) : nativeRatio;
+    const containerRatio = containerW / containerH;
+
+    let renderW = containerW;
+    let renderH = containerH;
+
+    if (containerRatio > effectiveRatio) {
+      renderW = containerH * effectiveRatio;
+      renderH = containerH;
+    } else {
+      renderW = containerW;
+      renderH = containerW / effectiveRatio;
+    }
+
+    // CSS rotate 적용 전 요소의 너비/높이 (90도/270도 회전 시 역발상 스왑으로 화면에 100% 맞춤)
+    const elemW = isRotated90 ? renderH : renderW;
+    const elemH = isRotated90 ? renderW : renderH;
+
+    return {
+      elemW,
+      elemH,
+      renderW,
+      renderH
+    };
+  };
+
+  // 실제 렌더링된 미디어 사각형 영역 계산 (부모 컨테이너 기준 렌더 사각형)
+  const calculateMediaRenderRect = () => {
+    const box = getMediaBoxDimensions();
+    if (!box) return null;
+    return {
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      width: box.elemW,
+      height: box.elemH
+    } as DOMRect;
   };
 
   const updateVideoRect = () => {
@@ -1724,7 +1722,7 @@ function App() {
         isEditMode ? "pb-[130px]" : ""
       }`}>
         {videoSrc ? (
-          <div className="relative w-full h-full flex items-center justify-center bg-black/10">
+          <div ref={mediaContainerRef} className="relative w-full h-full flex items-center justify-center bg-black/10 overflow-hidden">
             {/* 크롭 모드 전용 우상단 플로팅 툴바 (iOS 스타일 glassmorphism floating pill) */}
             {isCropMode && (
               <div className="absolute top-4 right-4 z-50 flex items-center gap-2 p-1.5 px-2.5 rounded-2xl bg-neutral-900/90 border border-white/10 shadow-2xl backdrop-blur-2xl text-xs text-white/90 animate-[fadeIn_0.2s_ease-out]">
@@ -1828,8 +1826,9 @@ function App() {
               filePath={filePath}
               fileName={fileName || ""}
             />
-            {/* 미디어 렌더러 (비디오 vs 이미지 통합 래퍼 컨테이너 - 트랜스폼 및 크롭오버레이 1:1 공유) */}
+            {/* 미디어 렌더러 (비디오 vs 이미지 통합 래퍼 컨테이너 - 회전 크기 자동 맞춤 및 크롭오버레이 1:1 공유) */}
             {(() => {
+              const box = getMediaBoxDimensions();
               const isCropped = cropArea.x > 0.001 || cropArea.y > 0.001 || cropArea.w < 0.999 || cropArea.h < 0.999;
               const cropClipStyle = (isCropped && !isCropMode)
                 ? `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`
@@ -1837,10 +1836,11 @@ function App() {
 
               return (
                 <div
-                  className="relative w-full h-full flex items-center justify-center cursor-default"
+                  className="relative flex items-center justify-center cursor-default shrink-0 transition-all duration-200"
                   style={{
+                    width: box ? `${box.elemW}px` : "100%",
+                    height: box ? `${box.elemH}px` : "100%",
                     transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
-                    transition: "transform 0.15s ease-out",
                   }}
                   onMouseDown={handleVideoMouseDown}
                   onMouseUp={handleVideoMouseUp}
