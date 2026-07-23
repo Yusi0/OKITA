@@ -13,6 +13,7 @@ import { AudioVisualizer } from "./components/AudioVisualizer";
 import { AnimatedGifBadge } from "./components/AnimatedGifBadge";
 import { ContextMenu } from "./components/ContextMenu";
 import { InfoModal } from "./components/InfoModal";
+import { RatioDropdown } from "./components/RatioDropdown";
 import { Video, Film, Loader2, ChevronLeft, ChevronRight, RotateCw, FlipHorizontal } from "lucide-react";
 import "./App.css";
 
@@ -40,6 +41,7 @@ function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isControlsVisible, setIsControlsVisible] = useState(true);
+  const mediaContainerRef = useRef<HTMLDivElement>(null);
 
   // 편집 모드 관련 상태 정의
   const [isEditMode, setIsEditMode] = useState(false);
@@ -212,71 +214,57 @@ function App() {
   const isImage = filePath ? /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(filePath) : false;
   const isAnimatedGif = filePath ? /\.(gif|webp)$/i.test(filePath) : false;
 
-  // 실제 렌더링된 미디어 사각형 영역 계산 (레터박스/필러박스 제외, 비디오 및 이미지 통합 지원)
+  // 실제 렌더링된 미디어 사각형 영역 계산 (회전/반전/상단 툴바 마진, 레터박스/필러박스 정밀 대응)
   const calculateMediaRenderRect = () => {
+    if (!mediaContainerRef.current) return null;
+    const container = mediaContainerRef.current;
+    const containerW = container.clientWidth;
+    const containerH = container.clientHeight;
+    if (containerW === 0 || containerH === 0) return null;
+
+    let rawW = 0;
+    let rawH = 0;
+
     if (isImage) {
-      if (!imageRef.current) return null;
-      const img = imageRef.current;
-      const rect = img.getBoundingClientRect();
-      if (img.naturalWidth === 0) return null;
-      
-      const imgRatio = img.naturalWidth / img.naturalHeight;
-      const elementRatio = rect.width / rect.height;
-      
-      let renderWidth = rect.width;
-      let renderHeight = rect.height;
-      let renderLeft = rect.left;
-      let renderTop = rect.top;
-      
-      if (elementRatio > imgRatio) {
-        renderWidth = rect.height * imgRatio;
-        renderLeft = rect.left + (rect.width - renderWidth) / 2;
-      } else {
-        renderHeight = rect.width / imgRatio;
-        renderTop = rect.top + (rect.height - renderHeight) / 2;
-      }
-      
-      return {
-        x: renderLeft - rect.left,
-        y: renderTop - rect.top,
-        left: renderLeft,
-        top: renderTop,
-        width: renderWidth,
-        height: renderHeight
-      } as DOMRect;
+      if (!imageRef.current || imageRef.current.naturalWidth === 0) return null;
+      rawW = imageRef.current.naturalWidth;
+      rawH = imageRef.current.naturalHeight;
     } else {
       const video = getActiveVideo();
-      if (!video) return null;
-      const rect = video.getBoundingClientRect();
-      if (video.videoWidth === 0) return null;
-      
-      const videoRatio = video.videoWidth / video.videoHeight;
-      const elementRatio = rect.width / rect.height;
-      
-      let renderWidth = rect.width;
-      let renderHeight = rect.height;
-      let renderLeft = rect.left;
-      let renderTop = rect.top;
-      
-      if (elementRatio > videoRatio) {
-        // Pillarbox (가로 검은 여백)
-        renderWidth = rect.height * videoRatio;
-        renderLeft = rect.left + (rect.width - renderWidth) / 2;
-      } else {
-        // Letterbox (세로 검은 여백)
-        renderHeight = rect.width / videoRatio;
-        renderTop = rect.top + (rect.height - renderHeight) / 2;
-      }
-      
-      return {
-        x: renderLeft - rect.left,
-        y: renderTop - rect.top,
-        left: renderLeft,
-        top: renderTop,
-        width: renderWidth,
-        height: renderHeight
-      } as DOMRect;
+      if (!video || video.videoWidth === 0) return null;
+      rawW = video.videoWidth;
+      rawH = video.videoHeight;
     }
+
+    const isRotated90 = rotation === 90 || rotation === 270;
+    const mediaW = isRotated90 ? rawH : rawW;
+    const mediaH = isRotated90 ? rawW : rawH;
+    const aspect = mediaW / mediaH;
+    const containerAspect = containerW / containerH;
+
+    let renderW = containerW;
+    let renderH = containerH;
+    let renderLeft = 0;
+    let renderTop = 0;
+
+    if (containerAspect > aspect) {
+      renderW = containerH * aspect;
+      renderLeft = (containerW - renderW) / 2;
+    } else {
+      renderH = containerW / aspect;
+      renderTop = (containerH - renderH) / 2;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+
+    return {
+      x: renderLeft,
+      y: renderTop,
+      left: containerRect.left + renderLeft,
+      top: containerRect.top + renderTop,
+      width: renderW,
+      height: renderH,
+    } as DOMRect;
   };
 
   const updateVideoRect = () => {
@@ -1714,16 +1702,19 @@ function App() {
         </div>
       )}
 
-      {/* 메인 콘텐츠 영역 (편집 모드 시 비디오가 컨트롤 바 위로 축소되도록 바인딩) */}
-      <div className={`relative flex-1 flex items-center justify-center overflow-hidden z-10 transition-all duration-300 ${
-        isEditMode ? "pb-[130px]" : ""
-      }`}>
+      {/* 메인 콘텐츠 영역 (크롭 모드 시 상단 마진 pt-[52px], 편집 모드 시 하단 pb-[130px]) */}
+      <div
+        ref={mediaContainerRef}
+        className={`relative flex-1 flex items-center justify-center overflow-hidden z-10 transition-all duration-300 ${
+          isCropMode ? "pt-[52px]" : ""
+        } ${isEditMode ? "pb-[130px]" : ""}`}
+      >
         {videoSrc ? (
           <div className="relative w-full h-full flex items-center justify-center bg-black/10">
-            {/* 크롭 모드 전용 우상단 플로팅 툴바 (iOS 스타일 glassmorphism floating pill) */}
+            {/* 크롭 모드 전용 우상단 플로팅 툴바 (아이콘 단독 & 커스텀 비율 드롭다운) */}
             {isCropMode && (
-              <div className="absolute top-4 right-4 z-50 flex items-center gap-2 p-1.5 px-2.5 rounded-2xl bg-neutral-900/90 border border-white/10 shadow-2xl backdrop-blur-2xl text-xs text-white/90 animate-[fadeIn_0.2s_ease-out]">
-                {/* 90도 회전 */}
+              <div className="absolute top-3 right-4 z-50 flex items-center gap-1.5 p-1.5 px-2 rounded-2xl bg-neutral-900/90 border border-white/10 shadow-2xl backdrop-blur-2xl text-xs text-white/90 animate-[fadeIn_0.2s_ease-out]">
+                {/* 90도 회전 (아이콘 단독) */}
                 <button
                   type="button"
                   onClick={() => {
@@ -1731,14 +1722,12 @@ function App() {
                     setTimeout(updateVideoRect, 50);
                   }}
                   title="90도 시계방향 회전 (R)"
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/15 active:bg-white/10 transition-all cursor-pointer"
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/15 active:bg-white/10 transition-all cursor-pointer"
                 >
                   <RotateCw className="w-4 h-4 text-indigo-400" />
-                  <span className="font-medium">회전</span>
-                  <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-white/40">R</kbd>
                 </button>
 
-                {/* 좌우 반전 */}
+                {/* 좌우 반전 (아이콘 단독) */}
                 <button
                   type="button"
                   onClick={() => {
@@ -1746,38 +1735,25 @@ function App() {
                     setTimeout(updateVideoRect, 50);
                   }}
                   title="좌우 거울 반전 (H)"
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-all cursor-pointer ${
+                  className={`p-2 rounded-xl transition-all cursor-pointer ${
                     flipH
                       ? "bg-indigo-600/80 text-white font-semibold shadow-md shadow-indigo-600/30"
                       : "bg-white/5 hover:bg-white/15 active:bg-white/10 text-white/90"
                   }`}
                 >
                   <FlipHorizontal className="w-4 h-4" />
-                  <span className="font-medium">반전</span>
-                  <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-white/40">H</kbd>
                 </button>
 
                 <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
 
-                {/* 비율 선택 단추들 */}
-                <span className="text-[11px] text-white/40 font-medium px-1 select-none">비율:</span>
-                {(["free", "1:1", "16:9", "4:3", "9:16"] as const).map((ratio) => (
-                  <button
-                    key={ratio}
-                    type="button"
-                    onClick={() => {
-                      setCropAspectRatio(ratio);
-                      setTimeout(updateVideoRect, 50);
-                    }}
-                    className={`px-2.5 py-1 text-xs rounded-xl transition-all cursor-pointer ${
-                      cropAspectRatio === ratio
-                        ? "bg-indigo-600 text-white font-semibold shadow-md shadow-indigo-600/30"
-                        : "hover:bg-white/15 text-white/60 hover:text-white"
-                    }`}
-                  >
-                    {ratio === "free" ? "자유" : ratio}
-                  </button>
-                ))}
+                {/* 비율 선택 커스텀 드롭다운 */}
+                <RatioDropdown
+                  aspectRatio={cropAspectRatio}
+                  onChange={(ratio) => {
+                    setCropAspectRatio(ratio);
+                    setTimeout(updateVideoRect, 50);
+                  }}
+                />
 
                 <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
 
@@ -1802,7 +1778,7 @@ function App() {
               filePath={filePath}
               fileName={fileName || ""}
             />
-            {/* 미디어 렌더러 (비디오 vs 이미지 분기) */}
+            {/* 미디어 렌더러 (비디오 vs 이미지 분기 & 회전/반전 정밀 스타일) */}
             {isImage ? (
               <img
                 ref={imageRef}
@@ -1811,8 +1787,20 @@ function App() {
                   if (isCropMode) updateVideoRect();
                 }}
                 style={{
-                  transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+                  transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1})`,
                   transition: "transform 0.15s ease-out",
+                  ...((rotation === 90 || rotation === 270) && videoRect
+                    ? {
+                        width: `${videoRect.height}px`,
+                        height: `${videoRect.width}px`,
+                        maxWidth: "none",
+                        maxHeight: "none",
+                      }
+                    : {
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "contain",
+                      }),
                 }}
                 className="w-full h-full object-contain pointer-events-none"
               />
@@ -1820,8 +1808,20 @@ function App() {
               <div
                 className="relative w-full h-full flex items-center justify-center cursor-default"
                 style={{
-                  transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+                  transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1})`,
                   transition: "transform 0.15s ease-out",
+                  ...((rotation === 90 || rotation === 270) && videoRect
+                    ? {
+                        width: `${videoRect.height}px`,
+                        height: `${videoRect.width}px`,
+                        maxWidth: "none",
+                        maxHeight: "none",
+                      }
+                    : {
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "contain",
+                      }),
                 }}
                 onMouseDown={handleVideoMouseDown}
                 onMouseUp={handleVideoMouseUp}
