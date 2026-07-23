@@ -23,24 +23,45 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
   rotation = 0,
   flipH = false
 }) => {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
   if (!videoRect) return null;
 
   const { width: containerWidth, height: containerHeight } = videoRect;
 
-  // 회전 및 반전 각도에 따른 화면 마우스 벡터 -> 로컬 트랜스폼 좌표 변환 헬퍼 (Inverse Rotation Vector)
-  const getLocalMouseDelta = (screenDx: number, screenDy: number) => {
-    let localDx = screenDx;
-    let localDy = screenDy;
+  // 회전 및 반전 각도에 따른 실제 화면 뷰포트 크기 정규화 및 로컬 좌표 변환 헬퍼 (Inverse Rotation & Scale Axis Swap)
+  const getLocalMouseDelta = (pixelDx: number, pixelDy: number) => {
+    // 1. 회전된 비디오 컨테이너의 실제 화면 픽셀 크기(getBoundingClientRect) 계산
+    let screenW = containerWidth;
+    let screenH = containerHeight;
+
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        screenW = rect.width;
+        screenH = rect.height;
+      }
+    }
+
+    // 2. 화면 이동 픽셀을 실제 화면 컨테이너 크기로 정규화 (0.0 ~ 1.0 비율)
+    const normDx = pixelDx / screenW;
+    const normDy = pixelDy / screenH;
+
+    // 3. 회전 각도별 축 매핑 및 90도/270도 스케일 축 스와프 보정 (1:1 Locked Mouse Tracking)
+    let localDx = normDx;
+    let localDy = normDy;
 
     if (rotation === 90) {
-      localDx = screenDy;
-      localDy = -screenDx;
+      // 90도 회전 시: 화면 가로(normDx) -> 로컬 세로, 화면 세로(normDy) -> 로컬 가로
+      localDx = normDy;
+      localDy = -normDx;
     } else if (rotation === 180) {
-      localDx = -screenDx;
-      localDy = -screenDy;
+      localDx = -normDx;
+      localDy = -normDy;
     } else if (rotation === 270) {
-      localDx = -screenDy;
-      localDy = screenDx;
+      // 270도 회전 시: 화면 가로(normDx) -> 로컬 세로, 화면 세로(normDy) -> 로컬 가로
+      localDx = -normDy;
+      localDy = normDx;
     }
 
     if (flipH) {
@@ -137,9 +158,9 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
     const startTop = cropArea.y;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const screenDx = (moveEvent.clientX - startX) / containerWidth;
-      const screenDy = (moveEvent.clientY - startY) / containerHeight;
-      const { dx, dy } = getLocalMouseDelta(screenDx, screenDy);
+      const pixelDx = moveEvent.clientX - startX;
+      const pixelDy = moveEvent.clientY - startY;
+      const { dx, dy } = getLocalMouseDelta(pixelDx, pixelDy);
 
       let nextX = Math.max(0, Math.min(1 - cropArea.w, startLeft + dx));
       let nextY = Math.max(0, Math.min(1 - cropArea.h, startTop + dy));
@@ -170,9 +191,9 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
     const startHeight = cropArea.h;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const screenDx = (moveEvent.clientX - startX) / containerWidth;
-      const screenDy = (moveEvent.clientY - startY) / containerHeight;
-      const { dx, dy } = getLocalMouseDelta(screenDx, screenDy);
+      const pixelDx = moveEvent.clientX - startX;
+      const pixelDy = moveEvent.clientY - startY;
+      const { dx, dy } = getLocalMouseDelta(pixelDx, pixelDy);
 
       let nextLeft = startLeft;
       let nextTop = startTop;
@@ -275,6 +296,7 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
 
   return (
     <div
+      ref={containerRef}
       className="absolute pointer-events-auto select-none"
       style={{
         left: `${videoRect.x}px`, // absolute container 상에서의 left 오프셋
