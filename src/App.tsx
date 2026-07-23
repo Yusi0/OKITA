@@ -66,25 +66,8 @@ function App() {
   const [flipH, setFlipH] = useState<boolean>(false);
   const [flipV, setFlipV] = useState<boolean>(false);
 
-  const handleRotate = () => {
-    setRotation((prev) => (prev + 90) % 360);
-    setCropArea((prev) => ({
-      x: Math.max(0, Math.min(1, 1 - (prev.y + prev.h))),
-      y: Math.max(0, Math.min(1, prev.x)),
-      w: Math.max(0.05, Math.min(1, prev.h)),
-      h: Math.max(0.05, Math.min(1, prev.w)),
-    }));
-  };
-
-  const handleFlipH = () => {
-    setFlipH((prev) => !prev);
-    setCropArea((prev) => ({
-      x: Math.max(0, Math.min(1, 1 - (prev.x + prev.w))),
-      y: prev.y,
-      w: prev.w,
-      h: prev.h,
-    }));
-  };
+  const handleRotate = () => setRotation((prev) => (prev + 90) % 360);
+  const handleFlipH = () => setFlipH((prev) => !prev);
   const handleFlipV = () => setFlipV((prev) => !prev);
 
   // v0.2.0 멀티 클립 타임라인 관련 상태 및 동기식 useRef 히스토리 스택 정의
@@ -230,36 +213,36 @@ function App() {
   const isImage = filePath ? /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(filePath) : false;
   const isAnimatedGif = filePath ? /\.(gif|webp)$/i.test(filePath) : false;
 
-  // 실제 렌더링된 미디어 사각형 영역 계산 (레터박스/필러박스 및 90도/270도 회전 통합 지원)
+  // 실제 렌더링된 미디어 사각형 영역 계산 (부모 컨테이너 기준 미반전/미회전 순수 렌더 사각형)
   const calculateMediaRenderRect = () => {
-    const isRotated90 = rotation === 90 || rotation === 270;
-
     if (isImage) {
       if (!imageRef.current) return null;
       const img = imageRef.current;
-      const rect = img.getBoundingClientRect();
-      if (img.naturalWidth === 0) return null;
-      
-      const naturalRatio = img.naturalWidth / img.naturalHeight;
-      const mediaRatio = isRotated90 ? (1 / naturalRatio) : naturalRatio;
-      const elementRatio = rect.width / rect.height;
-      
-      let renderWidth = rect.width;
-      let renderHeight = rect.height;
-      let renderLeft = rect.left;
-      let renderTop = rect.top;
-      
-      if (elementRatio > mediaRatio) {
-        renderWidth = rect.height * mediaRatio;
-        renderLeft = rect.left + (rect.width - renderWidth) / 2;
+      const container = img.parentElement;
+      if (!container || img.naturalWidth === 0) return null;
+
+      const containerW = container.clientWidth;
+      const containerH = container.clientHeight;
+
+      const imgRatio = img.naturalWidth / img.naturalHeight;
+      const containerRatio = containerW / containerH;
+
+      let renderWidth = containerW;
+      let renderHeight = containerH;
+      let renderLeft = 0;
+      let renderTop = 0;
+
+      if (containerRatio > imgRatio) {
+        renderWidth = containerH * imgRatio;
+        renderLeft = (containerW - renderWidth) / 2;
       } else {
-        renderHeight = rect.width / mediaRatio;
-        renderTop = rect.top + (rect.height - renderHeight) / 2;
+        renderHeight = containerW / imgRatio;
+        renderTop = (containerH - renderHeight) / 2;
       }
-      
+
       return {
-        x: renderLeft - rect.left,
-        y: renderTop - rect.top,
+        x: renderLeft,
+        y: renderTop,
         left: renderLeft,
         top: renderTop,
         width: renderWidth,
@@ -268,31 +251,31 @@ function App() {
     } else {
       const video = getActiveVideo();
       if (!video) return null;
-      const rect = video.getBoundingClientRect();
-      if (video.videoWidth === 0) return null;
-      
-      const naturalRatio = video.videoWidth / video.videoHeight;
-      const mediaRatio = isRotated90 ? (1 / naturalRatio) : naturalRatio;
-      const elementRatio = rect.width / rect.height;
-      
-      let renderWidth = rect.width;
-      let renderHeight = rect.height;
-      let renderLeft = rect.left;
-      let renderTop = rect.top;
-      
-      if (elementRatio > mediaRatio) {
-        // Pillarbox (가로 검은 여백)
-        renderWidth = rect.height * mediaRatio;
-        renderLeft = rect.left + (rect.width - renderWidth) / 2;
+      const container = video.parentElement;
+      if (!container || video.videoWidth === 0) return null;
+
+      const containerW = container.clientWidth;
+      const containerH = container.clientHeight;
+
+      const videoRatio = video.videoWidth / video.videoHeight;
+      const containerRatio = containerW / containerH;
+
+      let renderWidth = containerW;
+      let renderHeight = containerH;
+      let renderLeft = 0;
+      let renderTop = 0;
+
+      if (containerRatio > videoRatio) {
+        renderWidth = containerH * videoRatio;
+        renderLeft = (containerW - renderWidth) / 2;
       } else {
-        // Letterbox (세로 검은 여백)
-        renderHeight = rect.width / mediaRatio;
-        renderTop = rect.top + (rect.height - renderHeight) / 2;
+        renderHeight = containerW / videoRatio;
+        renderTop = (containerH - renderHeight) / 2;
       }
-      
+
       return {
-        x: renderLeft - rect.left,
-        y: renderTop - rect.top,
+        x: renderLeft,
+        y: renderTop,
         left: renderLeft,
         top: renderTop,
         width: renderWidth,
@@ -1845,70 +1828,97 @@ function App() {
               filePath={filePath}
               fileName={fileName || ""}
             />
-            {/* 미디어 렌더러 (비디오 vs 이미지 분기) */}
-            {isImage ? (
-              <img
-                ref={imageRef}
-                src={videoSrc}
-                onLoad={() => {
-                  if (isCropMode) updateVideoRect();
-                }}
-                style={{
-                  transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
-                  transition: "transform 0.15s ease-out",
-                }}
-                className="w-full h-full object-contain pointer-events-none"
-              />
-            ) : (
-              <div
-                className="relative w-full h-full flex items-center justify-center cursor-default"
-                style={{
-                  transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
-                  transition: "transform 0.15s ease-out",
-                }}
-                onMouseDown={handleVideoMouseDown}
-                onMouseUp={handleVideoMouseUp}
-                onMouseLeave={handleVideoMouseLeave}
-                onTouchStart={handleVideoTouchStart}
-                onTouchEnd={handleVideoTouchEnd}
-                onTouchCancel={handleVideoTouchCancel}
-              >
-                <video
-                  ref={videoRefA}
-                  src={videoSrc}
-                  onTimeUpdate={handleTimeUpdate}
-                  onLoadedMetadata={handleLoadedMetadata}
-                  onDurationChange={handleDurationChange}
-                  onEnded={handleVideoEnded}
-                  onPlay={() => setIsPlaying(true)}
-                  onPause={() => {
-                    if (!isJumpingRef.current && activePlayer === "A") {
-                      setIsPlaying(false);
-                    }
+            {/* 미디어 렌더러 (비디오 vs 이미지 통합 래퍼 컨테이너 - 트랜스폼 및 크롭오버레이 1:1 공유) */}
+            {(() => {
+              const isCropped = cropArea.x > 0.001 || cropArea.y > 0.001 || cropArea.w < 0.999 || cropArea.h < 0.999;
+              const cropClipStyle = (isCropped && !isCropMode)
+                ? `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`
+                : undefined;
+
+              return (
+                <div
+                  className="relative w-full h-full flex items-center justify-center cursor-default"
+                  style={{
+                    transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+                    transition: "transform 0.15s ease-out",
                   }}
-                  className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
-                    activePlayer === "A" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
-                  }`}
-                />
-                <video
-                  ref={videoRefB}
-                  src={videoSrc}
-                  onTimeUpdate={handleTimeUpdate}
-                  onLoadedMetadata={handleLoadedMetadata}
-                  onDurationChange={handleDurationChange}
-                  onEnded={handleVideoEnded}
-                  onPlay={() => setIsPlaying(true)}
-                  onPause={() => {
-                    if (!isJumpingRef.current && activePlayer === "B") {
-                      setIsPlaying(false);
-                    }
-                  }}
-                  className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
-                    activePlayer === "B" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
-                  }`}
-                />
-              </div>
-            )}
+                  onMouseDown={handleVideoMouseDown}
+                  onMouseUp={handleVideoMouseUp}
+                  onMouseLeave={handleVideoMouseLeave}
+                  onTouchStart={handleVideoTouchStart}
+                  onTouchEnd={handleVideoTouchEnd}
+                  onTouchCancel={handleVideoTouchCancel}
+                >
+                  {isImage ? (
+                    <img
+                      ref={imageRef}
+                      src={videoSrc}
+                      onLoad={() => {
+                        if (isCropMode) updateVideoRect();
+                      }}
+                      style={{
+                        clipPath: cropClipStyle,
+                      }}
+                      className="w-full h-full object-contain pointer-events-none"
+                    />
+                  ) : (
+                    <>
+                      <video
+                        ref={videoRefA}
+                        src={videoSrc}
+                        onTimeUpdate={handleTimeUpdate}
+                        onLoadedMetadata={handleLoadedMetadata}
+                        onDurationChange={handleDurationChange}
+                        onEnded={handleVideoEnded}
+                        onPlay={() => setIsPlaying(true)}
+                        onPause={() => {
+                          if (!isJumpingRef.current && activePlayer === "A") {
+                            setIsPlaying(false);
+                          }
+                        }}
+                        style={{
+                          clipPath: cropClipStyle,
+                        }}
+                        className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
+                          activePlayer === "A" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
+                        }`}
+                      />
+                      <video
+                        ref={videoRefB}
+                        src={videoSrc}
+                        onTimeUpdate={handleTimeUpdate}
+                        onLoadedMetadata={handleLoadedMetadata}
+                        onDurationChange={handleDurationChange}
+                        onEnded={handleVideoEnded}
+                        onPlay={() => setIsPlaying(true)}
+                        onPause={() => {
+                          if (!isJumpingRef.current && activePlayer === "B") {
+                            setIsPlaying(false);
+                          }
+                        }}
+                        style={{
+                          clipPath: cropClipStyle,
+                        }}
+                        className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
+                          activePlayer === "B" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
+                        }`}
+                      />
+                    </>
+                  )}
+
+                  {/* 크롭 조절 박스 레이어 - 미디어와 1:1 로컬 트랜스폼 공간 공유 */}
+                  {isCropMode && (
+                    <CropOverlay
+                      videoRect={videoRect}
+                      cropArea={cropArea}
+                      onChange={setCropArea}
+                      aspectRatio={cropAspectRatio}
+                      onAspectRatioChange={setCropAspectRatio}
+                    />
+                  )}
+                </div>
+              );
+            })()}
 
             {/* 왼쪽 이동 화살표 (Hover Chevron) */}
             {currentFileIndex > 0 && (
@@ -1932,20 +1942,6 @@ function App() {
                   <ChevronRight className="w-5 h-5" />
                 </div>
               </div>
-            )}
-
-            {/* 크롭 조절 박스 레이어 */}
-            {isCropMode && (
-              <CropOverlay
-                videoRect={videoRect}
-                cropArea={cropArea}
-                onChange={setCropArea}
-                aspectRatio={cropAspectRatio}
-                onAspectRatioChange={setCropAspectRatio}
-                onRotate={handleRotate}
-                onFlipH={handleFlipH}
-                flipH={flipH}
-              />
             )}
           </div>
         ) : (
