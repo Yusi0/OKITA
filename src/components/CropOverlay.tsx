@@ -1,5 +1,4 @@
 import React from "react";
-import { RotateCw, FlipHorizontal } from "lucide-react";
 
 interface CropOverlayProps {
   videoRect: DOMRect | null;
@@ -17,10 +16,10 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
   cropArea,
   onChange,
   aspectRatio,
-  onAspectRatioChange,
-  onRotate,
-  onFlipH,
-  flipH = false
+  onAspectRatioChange: _onAspectRatioChange,
+  onRotate: _onRotate,
+  onFlipH: _onFlipH,
+  flipH: _flipH = false
 }) => {
   if (!videoRect) return null;
 
@@ -38,11 +37,10 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
   const ratioVal = getRatioVal();
 
   // 비율 변경 시 현재 위치 기준 스냅 처리
-  const handleRatioSelect = (newRatio: string) => {
-    onAspectRatioChange(newRatio);
-    if (newRatio === "free") return;
+  React.useEffect(() => {
+    if (aspectRatio === "free") return;
 
-    const snapVal = newRatio === "1:1" ? 1.0 : newRatio === "16:9" ? 16 / 9 : newRatio === "4:3" ? 4 / 3 : 9 / 16;
+    const snapVal = aspectRatio === "1:1" ? 1.0 : aspectRatio === "16:9" ? 16 / 9 : aspectRatio === "4:3" ? 4 / 3 : 9 / 16;
     const pixelRatio = containerWidth / containerHeight;
     const targetWHRatio = snapVal / pixelRatio;
 
@@ -72,7 +70,7 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
     if (nextY + nextH > 1) nextY = 1 - nextH;
 
     onChange({ x: nextX, y: nextY, w: nextW, h: nextH });
-  };
+  }, [aspectRatio, containerWidth, containerHeight]);
 
   // 1. 크롭박스 전체 드래그 이동 처리
   const handleBoxDragStart = (e: React.MouseEvent) => {
@@ -220,49 +218,7 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
         zIndex: 35
       }}
     >
-      {/* 1. iOS 스타일 회전 / 반전 / 비율 설정 플로팅 툴바 */}
-      <div className="absolute -top-13 left-1/2 -translate-x-1/2 flex items-center gap-1.5 p-1.5 rounded-2xl bg-neutral-900/95 border border-white/10 shadow-2xl backdrop-blur-xl text-xs text-white/80 z-50">
-        {onRotate && (
-          <button
-            type="button"
-            onClick={onRotate}
-            title="90도 시계방향 회전 (R)"
-            className="p-1.5 rounded-xl hover:bg-white/10 active:bg-white/5 text-white/70 hover:text-white transition-all cursor-pointer"
-          >
-            <RotateCw className="w-4 h-4" />
-          </button>
-        )}
-        {onFlipH && (
-          <button
-            type="button"
-            onClick={onFlipH}
-            title="좌우 거울 반전 (H)"
-            className={`p-1.5 rounded-xl transition-all cursor-pointer ${
-              flipH ? "bg-indigo-600/80 text-white font-medium" : "hover:bg-white/10 text-white/70 hover:text-white"
-            }`}
-          >
-            <FlipHorizontal className="w-4 h-4" />
-          </button>
-        )}
-
-        <div className="w-[1px] h-4 bg-white/10 mx-0.5" />
-
-        <span className="px-1.5 text-[11px] text-white/40 font-medium select-none">비율:</span>
-        {(["free", "1:1", "16:9", "4:3", "9:16"] as const).map((ratio) => (
-          <button
-            key={ratio}
-            type="button"
-            onClick={() => handleRatioSelect(ratio)}
-            className={`px-2 py-1 text-[11px] rounded-lg cursor-pointer transition-all ${
-              aspectRatio === ratio ? "bg-indigo-600 text-white font-semibold shadow-md shadow-indigo-600/30" : "hover:bg-white/10 text-white/60 hover:text-white"
-            }`}
-          >
-            {ratio === "free" ? "자유" : ratio}
-          </button>
-        ))}
-      </div>
-
-      {/* 2. 외곽 영역 반투명 마스킹 레이어 (SVG Path Subtraction) */}
+      {/* 1. 외곽 영역 반투명 마스킹 레이어 (SVG Path Subtraction) */}
       <svg className="absolute inset-0 w-full h-full pointer-events-none select-none">
         <path
           fill="rgba(0, 0, 0, 0.65)"
