@@ -1700,86 +1700,7 @@ function App() {
         </div>
       )}
 
-      {/* 크롭 모드 전용 우상단 독립 툴바 영역 (상단바 우측 배치 & 캔버스 가림 방지 자동 축소) */}
-      {isCropMode && (
-        <div className="relative flex-none flex items-center justify-between px-5 py-2 bg-neutral-900/95 border-b border-white/10 shadow-xl backdrop-blur-2xl z-40 animate-[slideDown_0.2s_ease-out]">
-          {/* 좌측 크롭 안내 모드 라벨 */}
-          <div className="flex items-center gap-2.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse" />
-            <span className="text-xs font-semibold tracking-wide text-white">크롭 & 회전 설정</span>
-          </div>
 
-          {/* 우측 독립 툴바 영역 */}
-          <div className="flex items-center gap-2">
-            {/* 90도 회전 버튼 */}
-            <button
-              type="button"
-              onClick={() => {
-                handleRotate();
-                setTimeout(updateVideoRect, 50);
-              }}
-              title="90도 시계방향 회전 (R)"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 active:bg-white/5 border border-white/10 text-xs font-medium text-white/90 transition-all cursor-pointer"
-            >
-              <RotateCw className="w-3.5 h-3.5 text-indigo-400" />
-              <span>90° 회전</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-white/40">R</kbd>
-            </button>
-
-            {/* 좌우 반전 버튼 */}
-            <button
-              type="button"
-              onClick={() => {
-                handleFlipH();
-                setTimeout(updateVideoRect, 50);
-              }}
-              title="좌우 거울 반전 (H)"
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
-                flipH
-                  ? "bg-indigo-600/80 border-indigo-500 text-white font-semibold shadow-md shadow-indigo-600/30"
-                  : "bg-white/5 hover:bg-white/10 active:bg-white/5 border-white/10 text-white/90"
-              }`}
-            >
-              <FlipHorizontal className="w-3.5 h-3.5" />
-              <span>좌우 반전</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-white/40">H</kbd>
-            </button>
-
-            <div className="w-[1px] h-4 bg-white/15 mx-1" />
-
-            {/* 크롭 비율 조절 버튼 목록 */}
-            <span className="text-[11px] text-white/40 font-medium mr-1 select-none">비율:</span>
-            {(["free", "1:1", "16:9", "4:3", "9:16"] as const).map((ratio) => (
-              <button
-                key={ratio}
-                type="button"
-                onClick={() => {
-                  setCropAspectRatio(ratio);
-                  setTimeout(updateVideoRect, 50);
-                }}
-                className={`px-2.5 py-1 text-xs rounded-xl transition-all cursor-pointer ${
-                  cropAspectRatio === ratio
-                    ? "bg-indigo-600 text-white font-semibold shadow-md shadow-indigo-600/30"
-                    : "bg-white/5 hover:bg-white/10 text-white/60 hover:text-white border border-white/5"
-                }`}
-              >
-                {ratio === "free" ? "자유" : ratio}
-              </button>
-            ))}
-
-            <div className="w-[1px] h-4 bg-white/15 mx-1" />
-
-            {/* 크롭 완료/적용 버튼 */}
-            <button
-              type="button"
-              onClick={() => setIsCropMode(false)}
-              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-xs font-semibold text-white shadow-lg shadow-emerald-600/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
-            >
-              완료
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* 인앱 커스텀 토스트 알림 메시지 */}
       {toastMessage && (
@@ -1799,6 +1720,78 @@ function App() {
       }`}>
         {videoSrc ? (
           <div className="relative w-full h-full flex items-center justify-center bg-black/10">
+            {/* 크롭 모드 전용 우상단 플로팅 툴바 (iOS 스타일 glassmorphism floating pill) */}
+            {isCropMode && (
+              <div className="absolute top-4 right-4 z-50 flex items-center gap-2 p-1.5 px-2.5 rounded-2xl bg-neutral-900/90 border border-white/10 shadow-2xl backdrop-blur-2xl text-xs text-white/90 animate-[fadeIn_0.2s_ease-out]">
+                {/* 90도 회전 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleRotate();
+                    setTimeout(updateVideoRect, 50);
+                  }}
+                  title="90도 시계방향 회전 (R)"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/15 active:bg-white/10 transition-all cursor-pointer"
+                >
+                  <RotateCw className="w-4 h-4 text-indigo-400" />
+                  <span className="font-medium">회전</span>
+                  <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-white/40">R</kbd>
+                </button>
+
+                {/* 좌우 반전 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleFlipH();
+                    setTimeout(updateVideoRect, 50);
+                  }}
+                  title="좌우 거울 반전 (H)"
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-all cursor-pointer ${
+                    flipH
+                      ? "bg-indigo-600/80 text-white font-semibold shadow-md shadow-indigo-600/30"
+                      : "bg-white/5 hover:bg-white/15 active:bg-white/10 text-white/90"
+                  }`}
+                >
+                  <FlipHorizontal className="w-4 h-4" />
+                  <span className="font-medium">반전</span>
+                  <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-white/40">H</kbd>
+                </button>
+
+                <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
+
+                {/* 비율 선택 단추들 */}
+                <span className="text-[11px] text-white/40 font-medium px-1 select-none">비율:</span>
+                {(["free", "1:1", "16:9", "4:3", "9:16"] as const).map((ratio) => (
+                  <button
+                    key={ratio}
+                    type="button"
+                    onClick={() => {
+                      setCropAspectRatio(ratio);
+                      setTimeout(updateVideoRect, 50);
+                    }}
+                    className={`px-2.5 py-1 text-xs rounded-xl transition-all cursor-pointer ${
+                      cropAspectRatio === ratio
+                        ? "bg-indigo-600 text-white font-semibold shadow-md shadow-indigo-600/30"
+                        : "hover:bg-white/15 text-white/60 hover:text-white"
+                    }`}
+                  >
+                    {ratio === "free" ? "자유" : ratio}
+                  </button>
+                ))}
+
+                <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
+
+                {/* 완료 버튼 */}
+                <button
+                  type="button"
+                  onClick={() => setIsCropMode(false)}
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-xs font-semibold text-white shadow-lg shadow-emerald-600/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
+                >
+                  완료
+                </button>
+              </div>
+            )}
+
             {/* 움짤 배지 */}
             <AnimatedGifBadge isAnimatedGif={isAnimatedGif} filePath={filePath} />
 
