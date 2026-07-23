@@ -1722,12 +1722,10 @@ function App() {
         </div>
       )}
 
-      {/* 메인 콘텐츠 영역 (편집 모드 시 비디오가 컨트롤 바 위로 축소되도록 바인딩) */}
-      <div className={`relative flex-1 flex items-center justify-center overflow-hidden z-10 transition-all duration-300 ${
-        isEditMode ? "pb-[130px]" : ""
-      }`}>
+      {/* 메인 콘텐츠 영역 */}
+      <div className="relative flex-1 flex items-center justify-center overflow-hidden z-10">
         {videoSrc ? (
-          <div ref={mediaContainerRef} className="relative w-full h-full flex items-center justify-center bg-black/10 overflow-hidden">
+          <div ref={mediaContainerRef} className="relative w-full h-full flex items-center justify-center overflow-hidden">
             {/* 크롭 모드 전용 우상단 플로팅 툴바 (iOS 스타일 glassmorphism floating pill) */}
             {isCropMode && (
               <div className="absolute top-4 right-4 z-50 flex items-center gap-2 p-1.5 px-2.5 rounded-2xl bg-neutral-900/90 border border-white/10 shadow-2xl backdrop-blur-2xl text-xs text-white/90 animate-[fadeIn_0.2s_ease-out]">
@@ -1846,10 +1844,7 @@ function App() {
                 // 2. 크롭 구역 중앙 정렬(Center Alignment) 및 확대 (Zoom Expand) 스케일 계산
                 const cx = cropArea.x + cropArea.w / 2;
                 const cy = cropArea.y + cropArea.h / 2;
-
-                const scaleX = 1 / cropArea.w;
-                const scaleY = 1 / cropArea.h;
-                const scale = Math.max(scaleX, scaleY);
+                const scale = 1 / Math.max(cropArea.w, cropArea.h);
 
                 const transX = scale * (0.5 - cx) * 100;
                 const transY = scale * (0.5 - cy) * 100;
