@@ -1852,19 +1852,43 @@ function App() {
                 // 1. 크롭 바깥 영역 마스킹
                 cropClipStyle = `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`;
 
-                // 2. 크롭 구역 중앙 정렬(Center Alignment) 및 확대 (Zoom Expand) 스케일 계산
+                // 2. 컨테이너 픽셀 기준 정확한 visual scale 계산
                 const isRotated90 = rotation === 90 || rotation === 270;
-                const cx = cropArea.x + cropArea.w / 2;
-                const cy = cropArea.y + cropArea.h / 2;
 
-                // 90도/270도 회전 시 화면상의 가로/세로 크롭 크기 스와프(Swap)
-                const effectiveW = isRotated90 ? cropArea.h : cropArea.w;
-                const effectiveH = isRotated90 ? cropArea.w : cropArea.h;
+                const mediaW = isImage
+                  ? (imageRef.current?.naturalWidth || 1)
+                  : (getActiveVideo()?.videoWidth || 1);
+                const mediaH = isImage
+                  ? (imageRef.current?.naturalHeight || 1)
+                  : (getActiveVideo()?.videoHeight || 1);
 
-                const scale = 1 / Math.max(effectiveW, effectiveH);
+                const visualCropWidth = (isRotated90 ? cropArea.h : cropArea.w) * (isRotated90 ? mediaH : mediaW);
+                const visualCropHeight = (isRotated90 ? cropArea.w : cropArea.h) * (isRotated90 ? mediaW : mediaH);
 
-                const transX = scale * (0.5 - cx) * 100;
-                const transY = scale * (0.5 - cy) * 100;
+                const containerW = box ? box.elemW : (mediaContainerRef.current?.clientWidth || 1);
+                const containerH = box ? box.elemH : (mediaContainerRef.current?.clientHeight || 1);
+
+                const scaleX = containerW / visualCropWidth;
+                const scaleY = containerH / visualCropHeight;
+                const scale = Math.min(scaleX, scaleY);
+
+                // 3. 회전 각도별 이동 벡터(transX, transY) 변환
+                const dx = (0.5 - (cropArea.x + cropArea.w / 2)) * scale * 100;
+                const dy = (0.5 - (cropArea.y + cropArea.h / 2)) * scale * 100;
+
+                let transX = dx;
+                let transY = dy;
+
+                if (rotation === 90) {
+                  transX = dy;
+                  transY = -dx;
+                } else if (rotation === 180) {
+                  transX = -dx;
+                  transY = -dy;
+                } else if (rotation === 270) {
+                  transX = -dy;
+                  transY = dx;
+                }
 
                 cropTransformStyle = `translate(${transX}%, ${transY}%) scale(${scale})`;
               }
