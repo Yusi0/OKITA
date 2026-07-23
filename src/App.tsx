@@ -1909,7 +1909,7 @@ function App() {
                   {/* 크롭 조절 박스 레이어 - 미디어와 1:1 로컬 트랜스폼 공간 공유 */}
                   {isCropMode && (
                     <CropOverlay
-                      videoRect={videoRect}
+                      videoRect={box ? ({ x: 0, y: 0, left: 0, top: 0, width: box.elemW, height: box.elemH } as DOMRect) : videoRect}
                       cropArea={cropArea}
                       onChange={setCropArea}
                       aspectRatio={cropAspectRatio}
