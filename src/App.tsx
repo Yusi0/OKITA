@@ -1843,26 +1843,16 @@ function App() {
                 // 1. 크롭 바깥 영역 마스킹
                 cropClipStyle = `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`;
 
-                // 2. 크롭 구역 중앙 정렬(Center Alignment) 및 확대 (Zoom Expand) 스케일 계산 (회전 각도별 축 스와프 매핑)
+                // 2. 크롭 구역 중앙 정렬(Center Alignment) 및 확대 (Zoom Expand) 스케일 계산
                 const cx = cropArea.x + cropArea.w / 2;
                 const cy = cropArea.y + cropArea.h / 2;
-                const dx = cx - 0.5;
-                const dy = cy - 0.5;
-                const scale = 1 / Math.max(cropArea.w, cropArea.h);
 
-                let transX = scale * (-dx) * 100;
-                let transY = scale * (-dy) * 100;
+                const scaleX = 1 / cropArea.w;
+                const scaleY = 1 / cropArea.h;
+                const scale = Math.max(scaleX, scaleY);
 
-                if (rotation === 90) {
-                  transX = scale * (-dy) * 100;
-                  transY = scale * (-dx) * 100;
-                } else if (rotation === 180) {
-                  transX = scale * (dx) * 100;
-                  transY = scale * (dy) * 100;
-                } else if (rotation === 270) {
-                  transX = scale * (dy) * 100;
-                  transY = scale * (-dx) * 100;
-                }
+                const transX = scale * (0.5 - cx) * 100;
+                const transY = scale * (0.5 - cy) * 100;
 
                 cropTransformStyle = `translate(${transX}%, ${transY}%) scale(${scale})`;
               }
