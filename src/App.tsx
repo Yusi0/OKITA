@@ -1020,6 +1020,7 @@ function App() {
 
   // 이웃 형제 미디어 로드 처리
   const handleLoadSiblingFile = (index: number) => {
+    if (isEditMode) return; // 편집 모드 중에는 전후 미디어 로드 방지
     if (index < 0 || index >= siblingFiles.length) return;
     const targetPath = siblingFiles[index];
     const fileUrl = convertFileSrc(targetPath);
@@ -1688,18 +1689,18 @@ function App() {
             {/* 움짤 배지 */}
             <AnimatedGifBadge isAnimatedGif={isAnimatedGif} filePath={filePath} />
 
-            {/* 편집 모드 전용 우상단 수평반전(Flip Horizontal) 버튼 */}
+            {/* 편집 모드 전용 우상단 수평반전(Flip Horizontal) 버튼 (배경/프레임 없이 흰 아이콘 + 그림자) */}
             {isEditMode && (
               <button
                 onClick={() => setIsFlipped((prev) => !prev)}
-                className={`absolute top-4 right-4 z-30 w-9 h-9 rounded-xl border backdrop-blur-md flex items-center justify-center transition-all duration-200 shadow-xl cursor-pointer hover:scale-105 active:scale-95 ${
+                className={`absolute top-6 right-6 z-30 p-2 transition-all duration-200 cursor-pointer hover:scale-110 active:scale-95 flex items-center justify-center ${
                   isFlipped
-                    ? "text-indigo-400 bg-indigo-600/30 border-indigo-500/50 shadow-indigo-600/20"
-                    : "text-white/80 bg-neutral-900/80 border-white/10 hover:text-white hover:bg-neutral-800/90"
+                    ? "text-indigo-400 drop-shadow-[0_4px_12px_rgba(99,102,241,0.8)]"
+                    : "text-white opacity-85 hover:opacity-100 drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)]"
                 }`}
                 title="수평 반전"
               >
-                <FlipHorizontal className="w-4.5 h-4.5" />
+                <FlipHorizontal className="w-6 h-6 stroke-[2.2]" />
               </button>
             )}
 
@@ -1775,8 +1776,8 @@ function App() {
               )}
             </div>
 
-            {/* 왼쪽 이동 화살표 (Hover Chevron) */}
-            {currentFileIndex > 0 && (
+            {/* 왼쪽 이동 화살표 (Hover Chevron) - 편집 모드가 아닐 때만 노출 */}
+            {!isEditMode && currentFileIndex > 0 && (
               <div
                 onClick={() => handleLoadSiblingFile(currentFileIndex - 1)}
                 className="absolute left-0 top-0 bottom-0 w-24 flex items-center justify-start pl-6 group cursor-pointer z-30 select-none animate-[fadeIn_0.3s_ease-out]"
@@ -1787,8 +1788,8 @@ function App() {
               </div>
             )}
 
-            {/* 오른쪽 이동 화살표 (Hover Chevron) */}
-            {currentFileIndex !== -1 && currentFileIndex < siblingFiles.length - 1 && (
+            {/* 오른쪽 이동 화살표 (Hover Chevron) - 편집 모드가 아닐 때만 노출 */}
+            {!isEditMode && currentFileIndex !== -1 && currentFileIndex < siblingFiles.length - 1 && (
               <div
                 onClick={() => handleLoadSiblingFile(currentFileIndex + 1)}
                 className="absolute right-0 top-0 bottom-0 w-24 flex items-center justify-end pr-6 group cursor-pointer z-30 select-none animate-[fadeIn_0.3s_ease-out]"
