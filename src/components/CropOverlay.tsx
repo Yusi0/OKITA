@@ -44,8 +44,12 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
     }
 
     // 2. 화면 이동 픽셀을 실제 화면 컨테이너 크기로 정규화 (0.0 ~ 1.0 비율)
-    const normDx = pixelDx / screenW;
-    const normDy = pixelDy / screenH;
+    let normDx = pixelDx / screenW;
+    let normDy = pixelDy / screenH;
+
+    if (flipH) {
+      normDx = -normDx;
+    }
 
     // 3. 회전 각도별 축 매핑 및 90도/270도 스케일 축 스와프 보정 (1:1 Locked Mouse Tracking)
     let localDx = normDx;
@@ -62,10 +66,6 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
       // 270도 회전 시: 화면 가로(normDx) -> 로컬 세로, 화면 세로(normDy) -> 로컬 가로
       localDx = -normDy;
       localDy = normDx;
-    }
-
-    if (flipH) {
-      localDx = -localDx;
     }
 
     return { dx: localDx, dy: localDy };

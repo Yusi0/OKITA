@@ -1869,7 +1869,8 @@ function App() {
               let cropClipStyle: string | undefined = undefined;
               let cropTransformStyle: string | undefined = undefined;
 
-              if (isCropped && !isCropMode) {
+              // 크롭 미리보기는 오직 '편집 모드(isEditMode)' 내에서 완료('!isCropMode')되었을 때만 적용 (재생 모드에서는 원본 영상 유지)
+              if (isEditMode && isCropped && !isCropMode) {
                 // 1. 크롭 바깥 영역 마스킹
                 cropClipStyle = `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`;
 
@@ -1884,13 +1885,18 @@ function App() {
                 cropTransformStyle = `translate(${transX}%, ${transY}%) scale(${scale})`;
               }
 
+              // 화면 기준 90도/270도 회전 시 화면 상대적 좌우 반전(Screen-Relative Horizontal Flip) 보정
+              const isRotated90or270 = rotation === 90 || rotation === 270;
+              const cssScaleX = isRotated90or270 ? (flipV ? -1 : 1) : (flipH ? -1 : 1);
+              const cssScaleY = isRotated90or270 ? (flipH ? -1 : 1) : (flipV ? -1 : 1);
+
               return (
                 <div
                   className="relative flex items-center justify-center cursor-default shrink-0 transition-all duration-200"
                   style={{
                     width: box ? `${box.elemW}px` : "100%",
                     height: box ? `${box.elemH}px` : "100%",
-                    transform: `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`,
+                    transform: `rotate(${rotation}deg) scaleX(${cssScaleX}) scaleY(${cssScaleY})`,
                   }}
                   onMouseDown={handleVideoMouseDown}
                   onMouseUp={handleVideoMouseUp}
@@ -2083,8 +2089,20 @@ function App() {
         onSaveClick={handleSaveClick}
         isCropMode={isCropMode}
         onToggleCrop={() => {
-          setIsCropMode((prev) => !prev);
-          // 크롭 켤 때 크기 다시 구함
+          setIsCropMode((prev) => {
+            const next = !prev;
+            if (!next) {
+              // 크롭 버튼을 다시 누르면: 크롭 취소 / 비활성화 (원본으로 전면 초기화)
+              setIsCropApplied(false);
+              setCropArea({ x: 0, y: 0, w: 1, h: 1 });
+              setCropAspectRatio("free");
+            } else {
+              if (!isCropApplied) {
+                setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
+              }
+            }
+            return next;
+          });
           setTimeout(updateVideoRect, 50);
         }}
         onCaptureFrame={handleCaptureFrame}
