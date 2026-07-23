@@ -1852,29 +1852,13 @@ function App() {
                 // 1. 크롭 바깥 영역 마스킹
                 cropClipStyle = `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`;
 
-                // 2. 크롭 비율(0.0~1.0) 기반 순수 배율 및 이동 벡터 계산
-                const isRotated90 = rotation === 90 || rotation === 270;
+                // 2. 크롭 구역 중앙 정렬(Center Alignment) 및 확대 (Zoom Expand) 스케일 계산
+                const cx = cropArea.x + cropArea.w / 2;
+                const cy = cropArea.y + cropArea.h / 2;
+                const scale = 1 / Math.max(cropArea.w, cropArea.h);
 
-                const scale = isRotated90
-                  ? Math.min(1 / cropArea.h, 1 / cropArea.w)
-                  : Math.min(1 / cropArea.w, 1 / cropArea.h);
-
-                const dx = (0.5 - (cropArea.x + cropArea.w / 2)) * scale * 100;
-                const dy = (0.5 - (cropArea.y + cropArea.h / 2)) * scale * 100;
-
-                let transX = dx;
-                let transY = dy;
-
-                if (rotation === 90) {
-                  transX = dy;
-                  transY = -dx;
-                } else if (rotation === 180) {
-                  transX = -dx;
-                  transY = -dy;
-                } else if (rotation === 270) {
-                  transX = -dy;
-                  transY = dx;
-                }
+                const transX = scale * (0.5 - cx) * 100;
+                const transY = scale * (0.5 - cy) * 100;
 
                 cropTransformStyle = `translate(${transX}%, ${transY}%) scale(${scale})`;
               }
@@ -1907,7 +1891,7 @@ function App() {
                         transformOrigin: "center",
                         transition: "all 0.25s ease-out",
                       }}
-                      className="w-full h-full object-contain pointer-events-none"
+                      className="w-full h-full object-fill pointer-events-none"
                     />
                   ) : (
                     <>
@@ -1930,7 +1914,7 @@ function App() {
                           transformOrigin: "center",
                           transition: "all 0.25s ease-out",
                         }}
-                        className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
+                        className={`w-full h-full object-fill absolute inset-0 transition-opacity duration-75 ${
                           activePlayer === "A" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
                         }`}
                       />
@@ -1953,7 +1937,7 @@ function App() {
                           transformOrigin: "center",
                           transition: "all 0.25s ease-out",
                         }}
-                        className={`w-full h-full object-contain absolute inset-0 transition-opacity duration-75 ${
+                        className={`w-full h-full object-fill absolute inset-0 transition-opacity duration-75 ${
                           activePlayer === "B" ? "opacity-100 z-10" : "opacity-0 pointer-events-none z-0"
                         }`}
                       />
