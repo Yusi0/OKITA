@@ -1682,11 +1682,11 @@ function App() {
       )}
 
       {/* 메인 콘텐츠 영역 (편집 모드 시 비디오가 컨트롤 바 위로 축소되도록 바인딩) */}
-      <div className={`relative flex-1 flex items-center justify-center overflow-hidden z-10 transition-all duration-300 ${
-        isEditMode ? "pb-[130px]" : ""
-      }`}>
+      <div className="relative flex-1 flex items-center justify-center overflow-hidden z-10">
         {videoSrc ? (
-          <div className="relative w-full h-full flex items-center justify-center bg-black/10">
+          <div className={`relative w-full h-full flex items-center justify-center transition-all duration-300 ${
+            isEditMode ? "pb-[148px]" : ""
+          }`}>
             {/* 움짤 배지 */}
             <AnimatedGifBadge isAnimatedGif={isAnimatedGif} filePath={filePath} />
 
