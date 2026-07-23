@@ -329,7 +329,7 @@ function App() {
     };
   }, [isCropMode, isImage, videoSrc]);
 
-  // 편집 모드 시 컨트롤 바 상시 고정화 처리
+  // 편집 모드 시 컨트롤 바 상시 고정화 및 메인 캔버스 300ms 트랜지션 크기 자동 보정
   useEffect(() => {
     if (isEditMode) {
       setIsControlsVisible(true);
@@ -337,7 +337,16 @@ function App() {
         window.clearTimeout(controlsTimeoutRef.current);
       }
     }
-  }, [isEditMode]);
+    updateVideoRect();
+    const t1 = setTimeout(updateVideoRect, 50);
+    const t2 = setTimeout(updateVideoRect, 150);
+    const t3 = setTimeout(updateVideoRect, 320);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, [isEditMode, rotation, flipH, flipV]);
 
   // 바탕화면 및 탐색기 드래그 앤 드롭 파일 수신 로직 (편집 모드 시 프리미어 프로 스타일 타임라인 삽입)
   useEffect(() => {
@@ -1722,8 +1731,10 @@ function App() {
         </div>
       )}
 
-      {/* 메인 콘텐츠 영역 */}
-      <div className="relative flex-1 flex items-center justify-center overflow-hidden z-10">
+      {/* 메인 콘텐츠 영역 (편집 모드 시 비디오가 컨트롤 바 위 공간에 100% 가림 없이 들어가도록 스케일 축소) */}
+      <div className={`relative flex-1 flex items-center justify-center overflow-hidden z-10 transition-all duration-300 ${
+        isEditMode ? "pb-[115px]" : ""
+      }`}>
         {videoSrc ? (
           <div ref={mediaContainerRef} className="relative w-full h-full flex items-center justify-center overflow-hidden">
             {/* 크롭 모드 전용 우상단 플로팅 툴바 (iOS 스타일 glassmorphism floating pill) */}
