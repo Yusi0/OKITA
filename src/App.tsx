@@ -1844,12 +1844,12 @@ function App() {
                 cropClipStyle = `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`;
 
                 // 2. 크롭 구역 중앙 정렬(Center Alignment) 및 확대 (Zoom Expand) 스케일 계산
-                const cropCenterX = cropArea.x + cropArea.w / 2;
-                const cropCenterY = cropArea.y + cropArea.h / 2;
-
-                const transX = (0.5 - cropCenterX) * 100;
-                const transY = (0.5 - cropCenterY) * 100;
+                const cx = cropArea.x + cropArea.w / 2;
+                const cy = cropArea.y + cropArea.h / 2;
                 const scale = 1 / Math.max(cropArea.w, cropArea.h);
+
+                const transX = scale * (0.5 - cx) * 100;
+                const transY = scale * (0.5 - cy) * 100;
 
                 cropTransformStyle = `translate(${transX}%, ${transY}%) scale(${scale})`;
               }

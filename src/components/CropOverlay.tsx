@@ -184,7 +184,7 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
 
     const startX = startE.clientX;
     const startY = startE.clientY;
-    
+
     const startLeft = cropArea.x;
     const startTop = cropArea.y;
     const startWidth = cropArea.w;
@@ -248,7 +248,7 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
       // [경계면 이탈 한계 방지 바운딩]
       if (nextLeft < 0) nextLeft = 0;
       if (nextTop < 0) nextTop = 0;
-      
+
       if (nextLeft + nextWidth > 1) {
         nextWidth = 1 - nextLeft;
         if (effectiveRatioVal) {
