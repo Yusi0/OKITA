@@ -50,9 +50,10 @@ function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
-  // 크롭(Crop) 및 캡처 관련 상태 정의
+  // 크롭(Crop) 및 캡처 관련 상태 정의 (5단계 상태 머신 구현)
   const [isCropMode, setIsCropMode] = useState(false);
   const [isCropApplied, setIsCropApplied] = useState(false);
+  const [appliedCropArea, setAppliedCropArea] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [cropArea, setCropArea] = useState<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 1, h: 1 });
   const [cropAspectRatio, setCropAspectRatio] = useState<string>("free");
   const [videoRect, setVideoRect] = useState<DOMRect | null>(null);
@@ -1113,13 +1114,14 @@ function App() {
       let cropW: number | null = null;
       let cropH: number | null = null;
 
-      const isCropped = isCropApplied || (cropArea.x > 0.001 || cropArea.y > 0.001 || cropArea.w < 0.999 || cropArea.h < 0.999);
+      const targetCrop = isCropMode ? cropArea : (isCropApplied && appliedCropArea ? appliedCropArea : cropArea);
+      const isCropped = isCropApplied || (targetCrop.x > 0.001 || targetCrop.y > 0.001 || targetCrop.w < 0.999 || targetCrop.h < 0.999);
       if (isCropped && imageRef.current) {
         const img = imageRef.current;
-        cropX = Math.round(cropArea.x * img.naturalWidth);
-        cropY = Math.round(cropArea.y * img.naturalHeight);
-        cropW = Math.round(cropArea.w * img.naturalWidth);
-        cropH = Math.round(cropArea.h * img.naturalHeight);
+        cropX = Math.round(targetCrop.x * img.naturalWidth);
+        cropY = Math.round(targetCrop.y * img.naturalHeight);
+        cropW = Math.round(targetCrop.w * img.naturalWidth);
+        cropH = Math.round(targetCrop.h * img.naturalHeight);
       }
 
       await invoke("export_image", {
@@ -1505,7 +1507,8 @@ function App() {
       let cropW: number | null = null;
       let cropH: number | null = null;
 
-      const isCropped = isCropApplied || (cropArea.x > 0.001 || cropArea.y > 0.001 || cropArea.w < 0.999 || cropArea.h < 0.999);
+      const targetCrop = isCropMode ? cropArea : (isCropApplied && appliedCropArea ? appliedCropArea : cropArea);
+      const isCropped = isCropApplied || (targetCrop.x > 0.001 || targetCrop.y > 0.001 || targetCrop.w < 0.999 || targetCrop.h < 0.999);
       let nativeW = 0;
       let nativeH = 0;
       if (isImage && imageRef.current) {
@@ -1520,10 +1523,10 @@ function App() {
       }
 
       if (isCropped && nativeW > 0 && nativeH > 0) {
-        cropX = Math.round(cropArea.x * nativeW);
-        cropY = Math.round(cropArea.y * nativeH);
-        cropW = Math.round(cropArea.w * nativeW);
-        cropH = Math.round(cropArea.h * nativeH);
+        cropX = Math.round(targetCrop.x * nativeW);
+        cropY = Math.round(targetCrop.y * nativeH);
+        cropW = Math.round(targetCrop.w * nativeW);
+        cropH = Math.round(targetCrop.h * nativeH);
       }
 
       await invoke("export_video", {
@@ -1601,7 +1604,9 @@ function App() {
     setTrimStart(0);
     setTrimEnd(duration);
     setIsCropMode(false);
-    setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
+    setIsCropApplied(false);
+    setAppliedCropArea(null);
+    setCropArea({ x: 0, y: 0, w: 1, h: 1 });
     setCropAspectRatio("free");
 
     setIsEditMode((prev) => {
@@ -1837,12 +1842,32 @@ function App() {
 
                 <div className="w-[1px] h-4 bg-white/15 mx-0.5" />
 
-                {/* 완료 버튼 */}
+                {/* 크롭 초기화 버튼 */}
+                {isCropApplied && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCropApplied(false);
+                      setAppliedCropArea(null);
+                      setCropArea({ x: 0, y: 0, w: 1, h: 1 });
+                      setCropAspectRatio("free");
+                      setIsCropMode(false);
+                      setTimeout(updateVideoRect, 50);
+                    }}
+                    title="크롭 해제 (원본 복원)"
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 text-xs font-medium transition-all cursor-pointer"
+                  >
+                    <span>초기화</span>
+                  </button>
+                )}
+
+                {/* 완료 버튼 (Step 3.2: 현재 cropArea를 appliedCropArea로 최종 확정) */}
                 <button
                   type="button"
                   onClick={() => {
                     setIsCropMode(false);
                     setIsCropApplied(true);
+                    setAppliedCropArea({ ...cropArea });
                   }}
                   className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-xs font-semibold text-white shadow-lg shadow-emerald-600/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
                 >
@@ -1864,7 +1889,8 @@ function App() {
             {/* 미디어 렌더러 (비디오 vs 이미지 통합 래퍼 컨테이너 - 회전 크기 자동 맞춤 및 크롭오버레이 1:1 공유) */}
             {(() => {
               const box = getMediaBoxDimensions();
-              const isCropped = isCropApplied || (cropArea.x > 0.001 || cropArea.y > 0.001 || cropArea.w < 0.999 || cropArea.h < 0.999);
+              const activeCrop = isCropMode ? cropArea : (isCropApplied && appliedCropArea ? appliedCropArea : cropArea);
+              const isCropped = isCropApplied || (activeCrop.x > 0.001 || activeCrop.y > 0.001 || activeCrop.w < 0.999 || activeCrop.h < 0.999);
 
               let cropClipStyle: string | undefined = undefined;
               let cropTransformStyle: string | undefined = undefined;
@@ -1872,12 +1898,12 @@ function App() {
               // 크롭 미리보기는 오직 '편집 모드(isEditMode)' 내에서 완료('!isCropMode')되었을 때만 적용 (재생 모드에서는 원본 영상 유지)
               if (isEditMode && isCropped && !isCropMode) {
                 // 1. 크롭 바깥 영역 마스킹
-                cropClipStyle = `inset(${cropArea.y * 100}% ${(1 - cropArea.x - cropArea.w) * 100}% ${(1 - cropArea.y - cropArea.h) * 100}% ${cropArea.x * 100}%)`;
+                cropClipStyle = `inset(${activeCrop.y * 100}% ${(1 - activeCrop.x - activeCrop.w) * 100}% ${(1 - activeCrop.y - activeCrop.h) * 100}% ${activeCrop.x * 100}%)`;
 
                 // 2. 크롭 구역 중앙 정렬(Center Alignment) 및 확대 (Zoom Expand) 스케일 계산
-                const cx = cropArea.x + cropArea.w / 2;
-                const cy = cropArea.y + cropArea.h / 2;
-                const scale = 1 / Math.max(cropArea.w, cropArea.h);
+                const cx = activeCrop.x + activeCrop.w / 2;
+                const cy = activeCrop.y + activeCrop.h / 2;
+                const scale = 1 / Math.max(activeCrop.w, activeCrop.h);
 
                 const transX = scale * (0.5 - cx) * 100;
                 const transY = scale * (0.5 - cy) * 100;
@@ -2093,12 +2119,23 @@ function App() {
           setIsCropMode((prev) => {
             const next = !prev;
             if (!next) {
-              // 크롭 버튼을 다시 누르면: 크롭 취소 / 비활성화 (원본으로 전면 초기화)
-              setIsCropApplied(false);
-              setCropArea({ x: 0, y: 0, w: 1, h: 1 });
-              setCropAspectRatio("free");
+              // Step 3.1 & Step 5: 크롭 버튼을 다시 누르는 경우 (취소 / 3.2 상태로 원복)
+              if (isCropApplied && appliedCropArea) {
+                // Step 5: 이전에 적용된 3.2 상태가 존재하면 3.2 크롭 상태로 원복 유지!
+                setCropArea({ ...appliedCropArea });
+              } else {
+                // Step 3.1: 이전에 적용된 크롭이 없었다면 1단계 원본 상태로 취소!
+                setIsCropApplied(false);
+                setCropArea({ x: 0, y: 0, w: 1, h: 1 });
+                setCropAspectRatio("free");
+              }
             } else {
-              if (!isCropApplied) {
+              // Step 2 & Step 4: 크롭을 켜는 경우
+              if (isCropApplied && appliedCropArea) {
+                // Step 4: 이미 적용된 3.2 크롭 구역을 불러와 조정 상태로 진입
+                setCropArea({ ...appliedCropArea });
+              } else {
+                // Step 2: 최초 크롭 활성화 시 디폴트 80% 가이드 박스 제공
                 setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
               }
             }
