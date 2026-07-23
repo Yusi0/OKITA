@@ -23,12 +23,13 @@ export const TOOLTIPS = {
     playbackSpeed: "재생 속도",
     rotate: "90도 시계방향 회전 (R)",
     flipH: "좌우 반전 (H)",
-    flipV: "상하 반전 (V)",
   },
 
   // 2. 우클릭 커스텀 컨텍스트 메뉴 라벨 및 설명
   contextMenu: {
     captureFrame: "현재 프레임 추출",
+    rotate: "90° 시계방향 회전",
+    flipH: "좌우 반전",
     playbackSpeed: "재생 속도",
     keybinds: "단축키 안내",
     about: "앱 정보",

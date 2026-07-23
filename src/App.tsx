@@ -465,6 +465,8 @@ function App() {
               setCurrentTime(0);
               setSmoothTime(0);
               setDuration(0);
+              setRotation(0);
+              setFlipH(false);
               setIsEditMode(false);
               setIsCropMode(false);
               setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
@@ -983,6 +985,8 @@ function App() {
         setCurrentTime(0);
         setSmoothTime(0);
         setDuration(0);
+        setRotation(0);
+        setFlipH(false);
         setIsEditMode(false); // 편집 모드 초기화
         setIsCropMode(false); // 크롭 모드 초기화
         setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
@@ -1033,6 +1037,8 @@ function App() {
     setCurrentTime(0);
     setSmoothTime(0);
     setDuration(0);
+    setRotation(0);
+    setFlipH(false);
     setIsEditMode(false);
     setIsCropMode(false);
     setCropArea({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 });
@@ -1203,10 +1209,6 @@ function App() {
         case "KeyH":
           e.preventDefault();
           handleFlipH();
-          break;
-        case "KeyV":
-          e.preventDefault();
-          handleFlipV();
           break;
         case "KeyZ":
           if (e.ctrlKey || e.metaKey) {
@@ -1815,6 +1817,9 @@ function App() {
                 onChange={setCropArea}
                 aspectRatio={cropAspectRatio}
                 onAspectRatioChange={setCropAspectRatio}
+                onRotate={handleRotate}
+                onFlipH={handleFlipH}
+                flipH={flipH}
               />
             )}
           </div>
@@ -1998,6 +2003,9 @@ function App() {
         onCaptureFrame={handleCaptureFrame}
         onPlaybackSpeedChange={handlePlaybackSpeedChange}
         onOpenInfoModal={handleOpenInfoModal}
+        onRotate={handleRotate}
+        onFlipH={handleFlipH}
+        flipH={flipH}
       />
 
       {/* 단축키 목록 및 제작자(Yusi0) / 깃허브 정보 모달 */}

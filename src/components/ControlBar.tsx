@@ -10,11 +10,7 @@ import {
   FolderOpen,
   Scissors,
   Save,
-  Crop,
-  Camera,
-  RotateCw,
-  FlipHorizontal,
-  FlipVertical
+  Crop
 } from "lucide-react";
 
 export interface ClipSegment {
@@ -48,7 +44,7 @@ interface ControlBarProps {
   onSaveClick: () => void;
   isCropMode: boolean;
   onToggleCrop: () => void;
-  onCaptureFrame: () => void;
+  onCaptureFrame?: () => void;
   isImage?: boolean;
   playbackSpeed: number;
   onPlaybackSpeedChange: (speed: number) => void;
@@ -98,7 +94,7 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onSaveClick,
   isCropMode,
   onToggleCrop,
-  onCaptureFrame,
+  onCaptureFrame: _onCaptureFrame,
   isImage = false,
   playbackSpeed,
   onPlaybackSpeedChange,
@@ -110,12 +106,12 @@ export const ControlBar: React.FC<ControlBarProps> = ({
   onSelectClip,
   dropInsertIndex,
   isDraggingAsset,
-  rotation = 0,
-  flipH = false,
-  flipV = false,
-  onRotate,
-  onFlipH,
-  onFlipV
+  rotation: _rotation = 0,
+  flipH: _flipH = false,
+  flipV: _flipV = false,
+  onRotate: _onRotate,
+  onFlipH: _onFlipH,
+  onFlipV: _onFlipV
 }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -441,71 +437,6 @@ export const ControlBar: React.FC<ControlBarProps> = ({
                 title={isCropMode ? TOOLTIPS.controlBar.cropModeDisable : TOOLTIPS.controlBar.cropModeEnable}
               >
                 <Crop className="w-4.5 h-4.5" />
-              </button>
-            )}
-
-            {/* Frame Capture Button */}
-            {isEditMode && !isImage && (
-              <button
-                onClick={(e) => {
-                  onCaptureFrame();
-                  (e.currentTarget as HTMLButtonElement).blur();
-                }}
-                className="flex items-center justify-center w-9 h-9 rounded-lg text-white/90 bg-white/5 hover:bg-indigo-500/20 hover:text-indigo-400 active:bg-white/10 border border-white/5 transition-all duration-150 cursor-pointer"
-                title={TOOLTIPS.controlBar.captureFrame}
-              >
-                <Camera className="w-4.5 h-4.5" />
-              </button>
-            )}
-
-            {/* Rotate 90 deg Button */}
-            {hasVideo && onRotate && (
-              <button
-                onClick={(e) => {
-                  onRotate();
-                  (e.currentTarget as HTMLButtonElement).blur();
-                }}
-                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${rotation !== 0
-                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40"
-                    : "text-white/90 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
-                  }`}
-                title={TOOLTIPS.controlBar.rotate}
-              >
-                <RotateCw className="w-4 h-4" />
-              </button>
-            )}
-
-            {/* Flip Horizontal Button */}
-            {hasVideo && onFlipH && (
-              <button
-                onClick={(e) => {
-                  onFlipH();
-                  (e.currentTarget as HTMLButtonElement).blur();
-                }}
-                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${flipH
-                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40"
-                    : "text-white/90 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
-                  }`}
-                title={TOOLTIPS.controlBar.flipH}
-              >
-                <FlipHorizontal className="w-4 h-4" />
-              </button>
-            )}
-
-            {/* Flip Vertical Button */}
-            {hasVideo && onFlipV && (
-              <button
-                onClick={(e) => {
-                  onFlipV();
-                  (e.currentTarget as HTMLButtonElement).blur();
-                }}
-                className={`flex items-center justify-center w-9 h-9 rounded-lg border transition-all duration-150 cursor-pointer ${flipV
-                    ? "text-indigo-400 bg-indigo-500/20 border-indigo-500/40"
-                    : "text-white/90 bg-white/5 hover:bg-white/15 active:bg-white/10 border-white/5"
-                  }`}
-                title={TOOLTIPS.controlBar.flipV}
-              >
-                <FlipVertical className="w-4 h-4" />
               </button>
             )}
           </div>

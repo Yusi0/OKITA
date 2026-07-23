@@ -1,4 +1,5 @@
 import React from "react";
+import { RotateCw, FlipHorizontal } from "lucide-react";
 
 interface CropOverlayProps {
   videoRect: DOMRect | null;
@@ -6,6 +7,9 @@ interface CropOverlayProps {
   onChange: (crop: { x: number; y: number; w: number; h: number }) => void;
   aspectRatio: string;
   onAspectRatioChange: (ratio: string) => void;
+  onRotate?: () => void;
+  onFlipH?: () => void;
+  flipH?: boolean;
 }
 
 export const CropOverlay: React.FC<CropOverlayProps> = ({
@@ -13,7 +17,10 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
   cropArea,
   onChange,
   aspectRatio,
-  onAspectRatioChange
+  onAspectRatioChange,
+  onRotate,
+  onFlipH,
+  flipH = false
 }) => {
   if (!videoRect) return null;
 
@@ -24,6 +31,7 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
     if (aspectRatio === "1:1") return 1.0;
     if (aspectRatio === "16:9") return 16 / 9;
     if (aspectRatio === "4:3") return 4 / 3;
+    if (aspectRatio === "9:16") return 9 / 16;
     return null;
   };
 
@@ -34,7 +42,7 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
     onAspectRatioChange(newRatio);
     if (newRatio === "free") return;
 
-    const snapVal = newRatio === "1:1" ? 1.0 : newRatio === "16:9" ? 16 / 9 : 4 / 3;
+    const snapVal = newRatio === "1:1" ? 1.0 : newRatio === "16:9" ? 16 / 9 : newRatio === "4:3" ? 4 / 3 : 9 / 16;
     const pixelRatio = containerWidth / containerHeight;
     const targetWHRatio = snapVal / pixelRatio;
 
@@ -212,16 +220,41 @@ export const CropOverlay: React.FC<CropOverlayProps> = ({
         zIndex: 35
       }}
     >
-      {/* 1. 비율 설정용 플로팅 툴바 */}
-      <div className="absolute -top-12 left-1/2 -translate-x-1/2 flex items-center gap-1 p-1 rounded-xl bg-neutral-900/90 border border-white/10 shadow-lg text-[10px] text-white/80 z-50">
-        <span className="px-2 text-white/40 font-medium">크롭 비율:</span>
-        {(["free", "1:1", "16:9", "4:3"] as const).map((ratio) => (
+      {/* 1. iOS 스타일 회전 / 반전 / 비율 설정 플로팅 툴바 */}
+      <div className="absolute -top-13 left-1/2 -translate-x-1/2 flex items-center gap-1.5 p-1.5 rounded-2xl bg-neutral-900/95 border border-white/10 shadow-2xl backdrop-blur-xl text-xs text-white/80 z-50">
+        {onRotate && (
+          <button
+            type="button"
+            onClick={onRotate}
+            title="90도 시계방향 회전 (R)"
+            className="p-1.5 rounded-xl hover:bg-white/10 active:bg-white/5 text-white/70 hover:text-white transition-all cursor-pointer"
+          >
+            <RotateCw className="w-4 h-4" />
+          </button>
+        )}
+        {onFlipH && (
+          <button
+            type="button"
+            onClick={onFlipH}
+            title="좌우 거울 반전 (H)"
+            className={`p-1.5 rounded-xl transition-all cursor-pointer ${
+              flipH ? "bg-indigo-600/80 text-white font-medium" : "hover:bg-white/10 text-white/70 hover:text-white"
+            }`}
+          >
+            <FlipHorizontal className="w-4 h-4" />
+          </button>
+        )}
+
+        <div className="w-[1px] h-4 bg-white/10 mx-0.5" />
+
+        <span className="px-1.5 text-[11px] text-white/40 font-medium select-none">비율:</span>
+        {(["free", "1:1", "16:9", "4:3", "9:16"] as const).map((ratio) => (
           <button
             key={ratio}
             type="button"
             onClick={() => handleRatioSelect(ratio)}
-            className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
-              aspectRatio === ratio ? "bg-indigo-600 text-white font-semibold" : "hover:bg-white/5 text-white/60"
+            className={`px-2 py-1 text-[11px] rounded-lg cursor-pointer transition-all ${
+              aspectRatio === ratio ? "bg-indigo-600 text-white font-semibold shadow-md shadow-indigo-600/30" : "hover:bg-white/10 text-white/60 hover:text-white"
             }`}
           >
             {ratio === "free" ? "자유" : ratio}

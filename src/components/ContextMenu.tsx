@@ -5,7 +5,9 @@ import {
   Keyboard,
   Info,
   Check,
-  ChevronRight
+  ChevronRight,
+  RotateCw,
+  FlipHorizontal
 } from "lucide-react";
 import { TOOLTIPS } from "../constants/tooltips";
 
@@ -18,6 +20,9 @@ interface ContextMenuProps {
   onCaptureFrame: () => void;
   onPlaybackSpeedChange: (speed: number) => void;
   onOpenInfoModal: (tab: "keybinds" | "about") => void;
+  onRotate?: () => void;
+  onFlipH?: () => void;
+  flipH?: boolean;
 }
 
 const SPEED_OPTIONS = [0.5, 1.0, 1.25, 1.5, 2.0];
@@ -31,6 +36,9 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onCaptureFrame,
   onPlaybackSpeedChange,
   onOpenInfoModal,
+  onRotate,
+  onFlipH,
+  flipH = false,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [showSpeedSubmenu, setShowSpeedSubmenu] = useState(false);
@@ -38,7 +46,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   // 마우스 위치가 화면 경계를 벗어나지 않도록 좌표 동기 계산
   const getAdjustedPos = () => {
     const menuWidth = 224;
-    const menuHeight = 180;
+    const menuHeight = 260;
     const winW = window.innerWidth;
     const winH = window.innerHeight;
 
@@ -113,6 +121,43 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         </div>
         <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] text-white/40 font-mono">S</kbd>
       </button>
+
+      {/* 90도 회전 */}
+      {onRotate && (
+        <button
+          onClick={() => {
+            onRotate();
+            onClose();
+          }}
+          className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-white/10 transition-all text-white/80 hover:text-white cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5">
+            <RotateCw className="w-4 h-4 text-white/60" />
+            <span>{TOOLTIPS.contextMenu.rotate}</span>
+          </div>
+          <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] text-white/40 font-mono">R</kbd>
+        </button>
+      )}
+
+      {/* 좌우 반전 */}
+      {onFlipH && (
+        <button
+          onClick={() => {
+            onFlipH();
+            onClose();
+          }}
+          className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-white/10 transition-all text-white/80 hover:text-white cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5">
+            <FlipHorizontal className={`w-4 h-4 ${flipH ? "text-indigo-400" : "text-white/60"}`} />
+            <span>{TOOLTIPS.contextMenu.flipH}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {flipH && <Check className="w-3.5 h-3.5 text-indigo-400" />}
+            <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] text-white/40 font-mono">H</kbd>
+          </div>
+        </button>
+      )}
 
       {/* 2. 재생 속도 메뉴 */}
       <div
